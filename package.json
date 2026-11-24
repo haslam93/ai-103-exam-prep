@@ -1,0 +1,16 @@
+{
+  "name": "ai-103-exam-prep",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Free practice exams, cheat sheets and flashcards for Microsoft Exam AI-103: Developing AI Apps and Agents on Azure.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check:exam": "node scripts/check-exam.mjs",
+    "check:links": "node scripts/check-links.mjs",
+    "check:era": "node scripts/era-check.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

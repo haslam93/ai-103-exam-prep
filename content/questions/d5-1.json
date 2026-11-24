@@ -1,0 +1,445 @@
+{
+  "part": "d5",
+  "domain": 5,
+  "cheatsheet": [
+    {
+      "title": "Pick the extraction tool: Content Understanding vs Document Intelligence vs DIY LLM",
+      "kind": "table",
+      "columns": ["Requirement", "Use", "Why"],
+      "rows": [
+        ["OCR or layout only (text, tables, selection marks, Markdown)", "Content Understanding `prebuilt-read` / `prebuilt-layout`", "Lower cost, richer layout; no LLM or embedding deployment needed"],
+        ["RAG-ready Markdown, figure descriptions, summaries; also image, audio, video", "Content Understanding `prebuilt-documentSearch`, `prebuilt-imageSearch`, `prebuilt-audioSearch`, `prebuilt-videoSearch`", "Multimodal RAG analyzers that return Markdown plus a one-paragraph summary"],
+        ["Standard structured forms (invoice, receipt, ID, tax, mortgage)", "Document Intelligence prebuilt model (Content Understanding also has `prebuilt-invoice` and others)", "High accuracy and low latency on common templates"],
+        ["Mostly unstructured documents (contracts, agreements), inferred fields", "Content Understanding `prebuilt-contract` or a custom analyzer", "LLM-based reasoning; values that are not stated verbatim"],
+        ["Custom extraction, no labeled data, highly varied layouts", "Content Understanding custom analyzer (zero-shot field schema)", "Describe fields in plain language; confidence and grounding built in"],
+        ["Custom extraction with labels on highly structured forms", "Document Intelligence custom model", "Template = fixed layout, neural = varied layout; start with 5 labeled samples"],
+        ["Reason across several input files, cross-validate them, use reference data", "Exam era (Apr 2026): Content Understanding pro mode (preview). Docs today: agentic mode (preview)", "Standard mode extracts fields from one file; pro mode added multi-step reasoning, multiple inputs and a knowledge base of reference data"],
+        ["On-premises or air-gapped", "Document Intelligence containers", "Only option for disconnected environments"],
+        ["Full control over models and prompts", "Build your own on Foundry Models", "You must build OCR preprocessing, chunking, confidence and grounding yourself"]
+      ],
+      "note": "The decision guide is written against Content Understanding `2025-11-01` and Document Intelligence v4.0 (`2024-11-30`), so it matches the exam era. Docs today position Document Intelligence as part of the Content Understanding family; existing Document Intelligence APIs, SDKs and billing are unchanged and need no migration.",
+      "ref": {"title": "Choose the right Foundry Tool for document processing", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/choosing-right-ai-tool"}
+    },
+    {
+      "title": "Content Understanding prebuilt analyzer catalog (GA API `2025-11-01`)",
+      "kind": "table",
+      "columns": ["Category", "Analyzer IDs", "Remember"],
+      "rows": [
+        ["Content extraction", "`prebuilt-read`, `prebuilt-layout`, `prebuilt-digitalParse`", "No language or embedding model required; layout adds tables, sections, figure locations, hyperlinks, annotations"],
+        ["Base (parents for custom analyzers)", "`prebuilt-document`, `prebuilt-image`, `prebuilt-audio`, `prebuilt-video`", "The only valid `baseAnalyzerId` values"],
+        ["RAG", "`prebuilt-documentSearch`, `prebuilt-imageSearch`, `prebuilt-audioSearch`, `prebuilt-videoSearch`", "Markdown + one-paragraph summary; documentSearch adds figure descriptions (Chart.js / Mermaid) and chunk-ready output; videoSearch segments the video"],
+        ["Domain-specific", "`prebuilt-invoice`, `prebuilt-receipt`, `prebuilt-idDocument`, `prebuilt-contract`, `prebuilt-tax.us.w2`, `prebuilt-callCenter`, ...", "Composed routers `prebuilt-procurement`, `prebuilt-tax.us`, `prebuilt-mortgage.us` classify first, then route"],
+        ["Utility", "`prebuilt-documentFieldSchema`, `prebuilt-documentFields`", "Propose a field schema / extract generic key-value pairs"]
+      ],
+      "note": "Prebuilt definitions can change between API versions: for production, GET the prebuilt definition and PUT your own copy. Exam era (Apr 2026): the Learn module and SDK readme say prebuilts need GPT-4.1 (the `*Search` analyzers GPT-4.1-mini) plus text-embedding-3-large deployments. Docs today: prebuilts reference the aliases `prebuilt-analyzer-completion`, `prebuilt-analyzer-completion-mini` and `prebuilt-analyzer-embedding`, and GPT-5.2 is the recommended model.",
+      "ref": {"title": "Prebuilt analyzers in Azure Content Understanding in Foundry Tools", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/prebuilt-analyzers"}
+    },
+    {
+      "title": "Custom analyzer definition (body of PUT /contentunderstanding/analyzers/{analyzerId})",
+      "kind": "code",
+      "lang": "json",
+      "code": "{\n  \"description\": \"Claim form analyzer\",\n  \"baseAnalyzerId\": \"prebuilt-document\",\n  \"models\": { \"completion\": \"gpt-4.1\", \"embedding\": \"text-embedding-3-large\" },\n  \"config\": {\n    \"returnDetails\": true,\n    \"estimateFieldSourceAndConfidence\": true\n  },\n  \"fieldSchema\": {\n    \"fields\": {\n      \"PolicyNumber\": { \"type\": \"string\", \"method\": \"extract\", \"description\": \"Policy ID in the header\" },\n      \"Summary\": { \"type\": \"string\", \"method\": \"generate\", \"description\": \"Two-sentence summary\" },\n      \"Severity\": { \"type\": \"string\", \"method\": \"classify\", \"enum\": [\"Low\", \"Medium\", \"High\"] }\n    }\n  }\n}",
+      "note": "`models` holds catalog model names (today's docs also allow model aliases), never deployment names. `method` is optional: `extract` = verbatim value (documents only), `generate` = inferred or written by the model, `classify` = one of `enum`. Field types: string, date, time, number, integer, boolean, array, object. Descriptions act as mini-prompts. The PUT returns `201 Created` with an `Operation-Location` header. The preview-era `scenario` property is deprecated.",
+      "ref": {"title": "What is a Content Understanding analyzer?", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/analyzer-reference"}
+    },
+    {
+      "title": "Content Understanding config switches and limits",
+      "kind": "table",
+      "columns": ["Setting or limit", "Default or value", "What to remember"],
+      "rows": [
+        ["`estimateFieldSourceAndConfidence` (config) / `estimateSourceAndConfidence` (field)", "false", "Opt-in confidence (0-1) and `source` grounding such as `D(1,x1,y1,...,x4,y4)`; document analyzers only; works for extract, generate and classify"],
+        ["`returnDetails`", "false (varies by analyzer)", "Adds element-level detail such as bounding boxes and spans; much larger response"],
+        ["Processing mode", "Exam era (Apr 2026): `standard` (default) or `pro` (preview, API `2025-05-01-preview`)", "Standard = single-file field extraction. Pro mode added multi-step reasoning, multiple input documents and an external knowledge base (reference data) for linking, enrichment and validation; documents only; Foundry (classic) exposed them as single-file and multi-file (pro mode) tasks. Docs today: pro mode is retired; agentic mode (preview since Jul 2026) uses `config.workflow: agentic`, takes one input file and doesn't support `extract` fields"],
+        ["`enableOcr`, `enableLayout`, `enableFormula`", "true", "Turn OCR off for born-digital PDFs and formula off for business documents to improve performance"],
+        ["`enableFigureDescription`, `enableFigureAnalysis`", "false", "Figure text descriptions; charts as Chart.js, diagrams as Mermaid"],
+        ["`tableFormat`", "`html`", "Or `markdown`; HTML keeps merged cells; multipage tables are returned as one table"],
+        ["`contentCategories` + `enableSegment`", "not set / false", "Classify the whole file or split and classify; `analyzerId` per category routes to another analyzer; add an `other` category; 200 categories for documents, 1 for video"],
+        ["`segmentPerPage`, `omitContent`", "false", "Force one segment per page; return only sub-analyzer results"],
+        ["Async document input (PDF/TIFF)", "200 MB. Exam era (Apr 2026): 300 pages. Docs today: 2,000 pages (since Oct 2026)", "Docs today also offer synchronous Read/Layout (preview since Jul 2026): 10 MB, 5 pages"],
+        ["Fields per analyzer", "1,000", "300 classify categories across all fields"]
+      ],
+      "note": "`contentCategories` classifies or splits files and segments; a `classify` field classifies a value. In the GA API the smallest classification unit is one page (in-page segmentation arrived as a preview in Jul 2026). Classification moved into analyzers at GA (Nov 2025); the separate classifier API is deprecated.",
+      "ref": {"title": "Content Understanding service quotas and limits", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/service-limits"}
+    },
+    {
+      "title": "Content Understanding call pattern with the Python SDK (`azure-ai-contentunderstanding`)",
+      "kind": "code",
+      "lang": "python",
+      "code": "from azure.ai.contentunderstanding import ContentUnderstandingClient\nfrom azure.ai.contentunderstanding.models import AnalysisInput\nfrom azure.identity import DefaultAzureCredential\n\nclient = ContentUnderstandingClient(endpoint=endpoint, credential=DefaultAzureCredential())\npoller = client.begin_analyze(\n    analyzer_id=\"prebuilt-documentSearch\",\n    inputs=[AnalysisInput(url=doc_url)],\n)\nresult = poller.result()        # long-running operation; SDK polls for you\ncontent = result.contents[0]\nprint(content.markdown)         # clean Markdown for RAG and agents\nfor name, field in (content.fields or {}).items():\n    print(name, field.value, field.confidence, field.source)",
+      "note": "REST equivalent: `PATCH /contentunderstanding/defaults` with `modelDeployments` (once per resource) -> `POST /contentunderstanding/analyzers/{id}:analyze` with `inputs: [{url}]` -> `202` + `Operation-Location` -> `GET /contentunderstanding/analyzerResults/{id}` until `status` is `Succeeded`. File bytes: `:analyzeBinary` / `begin_analyze_binary`. Custom analyzer: `begin_create_analyzer`. REST field values are typed: `valueString`, `valueNumber`, `valueDate`, `valueObject`, `valueArray`. Exam era (Apr 2026): the Learn module names GPT-4.1, GPT-4.1-mini and text-embedding-3-large as the required deployments, and keyless callers need the Cognitive Services User role. Docs today: GPT-5.2 is recommended (check `supportedModels`), and dedicated Cognitive Services Content Understanding Reader / Contributor / Owner roles exist since May 2026.",
+      "ref": {"title": "Quickstart: Use Azure Content Understanding in Foundry Tools", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/quickstart/use-rest-api"}
+    },
+    {
+      "title": "Document Intelligence quick reference (v4.0, API `2024-11-30`)",
+      "kind": "table",
+      "columns": ["Topic", "Facts"],
+      "rows": [
+        ["Python SDK", "`azure-ai-documentintelligence`: `DocumentIntelligenceClient.begin_analyze_document(model_id, AnalyzeDocumentRequest(url_source=...))`, then `poller.result()`"],
+        ["`prebuilt-read`", "Printed and handwritten text, language detection; only model that supports searchable PDF (`output=pdf`)"],
+        ["`prebuilt-layout`", "Read + tables, selection marks, figures, sections; Markdown with `outputContentFormat=markdown` (Python `output_content_format`); `keyValuePairs` feature replaces the old general document model"],
+        ["Add-ons (`features=`)", "Free: `barcodes`, `languages`, `keyValuePairs`. Paid: `ocrHighResolution`, `formulas`, `styleFont`, `queryFields` (up to 20 fields; extends a prebuilt schema without training)"],
+        ["Custom template", "Needs a consistent visual template; trains in minutes; key-value pairs, selection marks, tables, regions, signatures"],
+        ["Custom neural", "Structured, semi-structured and unstructured documents; overlapping fields, signature detection, table/row/cell confidence; recommended when the language is supported"],
+        ["Composed model", "v4.0 uses an explicitly trained classifier plus up to 500 extraction models; `splitMode` none / perPage / auto; result includes `docType`"],
+        ["Custom classifier", "Identifies and splits document types before extraction; supports incremental training"],
+        ["Limits", "500 MB per file on S0, 4 MB on F0; start custom models with 5 labeled samples"]
+      ],
+      "note": "In Document Intelligence, `prebuilt-document` was the general document model (deprecated since the 2023-10-31 preview); in Content Understanding, `prebuilt-document` is the base analyzer for custom document analyzers. Nothing in this table changed after April 2026.",
+      "ref": {"title": "Document processing models", "url": "https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/model-overview"}
+    },
+    {
+      "title": "Azure AI Search index: vector and semantic settings",
+      "kind": "table",
+      "columns": ["Element", "Rule"],
+      "rows": [
+        ["Vector field", "`Collection(Edm.Single)` + `dimensions` + `vectorSearchProfile`; `searchable: true`; cannot be filterable, facetable or sortable; `retrievable: false` and `stored: false` save storage"],
+        ["Dimensions", "`text-embedding-ada-002` fixed 1536; `text-embedding-3-small` up to 1536; `text-embedding-3-large` up to 3072; must equal the embedding skill's `dimensions`"],
+        ["Algorithms", "`hnsw` (defaults `m` 4, `efConstruction` 400, `efSearch` 500) or `exhaustiveKnn`; metric `cosine` for Azure OpenAI embeddings"],
+        ["Compression", "`scalarQuantization` (int8, about 4x smaller) or `binaryQuantization` (up to 28x, best above 1024 dimensions); `rescoringOptions`: `enableRescoring`, `defaultOversampling` (default 4), `rescoreStorageMethod`; rescoring needs HNSW"],
+        ["Vectorizer", "`vectorSearch.vectorizers` (`kind: azureOpenAI`, `resourceUri`, `deploymentId`, `modelName`) referenced by the vector profile; required for `kind: text` queries; must be the model used at indexing"],
+        ["Semantic configuration", "`prioritizedFields`: title, content and keywords fields; required for `queryType: semantic` and for agentic retrieval"],
+        ["Parent-child chunks", "Skillset `indexProjections.selectors` (`targetIndexName`, `parentKeyFieldName`, `sourceContext`, `mappings`) with `projectionMode: skipIndexingParentDocuments`; chunk key field uses the `keyword` analyzer"],
+        ["Security field", "`Collection(Edm.String)`, `filterable: true`, `retrievable: false` for `search.in` filters. Native ACL enforcement uses permission-filter fields (`userIds`, `groupIds`, `rbacScope`): preview in the exam era (Apr 2026), GA in REST `2026-10-01`"]
+      ],
+      "note": "Exam era (Apr 2026): the service is called Azure AI Search and the newest stable REST API is `2026-04-01`. Docs today: branded Foundry IQ (Azure AI Search) since Nov 2026, stable REST API `2026-10-01`; endpoints, SDK packages and RBAC role names are unchanged. Roles: Search Service Contributor (manage objects), Search Index Data Contributor (load documents), Search Index Data Reader (query).",
+      "ref": {"title": "Create a vector index", "url": "https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-create-index"}
+    },
+    {
+      "title": "Azure AI Search queries and ranking",
+      "kind": "table",
+      "columns": ["Feature", "Request parameters", "Facts"],
+      "rows": [
+        ["Vector", "`vectorQueries[]`: `kind` (`vector` or `text`), `vector` or `text`, `fields`, `k`, `exhaustive`, `weight`, `oversampling`", "Always returns `k` neighbors even when they are poor matches; `kind: text` needs a vectorizer"],
+        ["Hybrid", "`search` + `vectorQueries`", "Queries run in parallel; Reciprocal Rank Fusion sums `1/(rank + k)` (k about 60) into `@search.score`; `top` sets the response size (default 50)"],
+        ["Semantic ranker", "`queryType: semantic`, `semanticConfiguration`, optional `captions` / `answers: extractive`", "Reranks the top 50; `@search.rerankerScore` 0-4; set vector `k` to 50; captions and answers are verbatim text; `orderby` causes HTTP 400"],
+        ["Filters with vectors", "`filter` + `vectorFilterMode`", "`preFilter` (default, best recall, slower), `postFilter` (can return fewer than `k`), `strictPostFilter` (preview)"],
+        ["Security trimming", "`filter`: `group_ids/any(g:search.in(g, 'id1, id2'))`", "App-managed pattern, GA for years. Native ACL enforcement passes the user's token in the header `x-ms-query-source-authorization` (preview in the exam era, GA in REST `2026-10-01`)"],
+        ["Python SDK", "`search_client.search(search_text=, vector_queries=[...], query_type=\"semantic\", semantic_configuration_name=, filter=, vector_filter_mode=, top=)`", "`VectorizedQuery(vector=, k_nearest_neighbors=, fields=)` or `VectorizableTextQuery(text=, k_nearest_neighbors=, fields=)`"]
+      ],
+      "note": "The RRF constant k has nothing to do with the vector query's `k`. BM25 scores have no upper bound, cosine vector scores range from 0.333 to 1.00, and RRF scores look small by design. Hybrid, RRF and semantic ranker behavior is the same in the exam era and today.",
+      "ref": {"title": "Relevance scoring in hybrid search using Reciprocal Rank Fusion (RRF)", "url": "https://learn.microsoft.com/en-us/azure/search/hybrid-search-ranking"}
+    },
+    {
+      "title": "Indexer and skillset pipeline (ingestion for RAG)",
+      "kind": "bullets",
+      "bullets": [
+        "Stages: document cracking -> `fieldMappings` (source field to index field, value as-is) -> skillset execution -> `outputFieldMappings` (enriched-document node such as `/document/merged_text` to an index field; required for every skill output you want indexed).",
+        "Indexers pull from Blob Storage, ADLS Gen2, Cosmos DB, Azure SQL, Table Storage, OneLake and more (the SharePoint in Microsoft 365 indexer was preview in the exam era and is GA since Nov 2026); schedule as often as every 5 minutes; one data source and one target index per indexer.",
+        "Images and OCR: indexer `imageAction: generateNormalizedImages` (needs `parsingMode: default` and `dataToExtract: contentAndMetadata`) -> OCR skill on `/document/normalized_images/*` -> Text Merge skill using each image's `contentOffset`.",
+        "Integrated vectorization: Text Split skill (`textSplitMode: pages`, `maximumPageLength` default 5000 characters, `pageOverlapLength`) -> Azure OpenAI Embedding skill (`resourceUri`, `deploymentId`, `modelName`, `dimensions`; 8,000-token input limit) -> index projections; add a matching vectorizer for query time.",
+        "Azure Content Understanding skill (`#Microsoft.Skills.Util.ContentUnderstandingSkill`): input `/document/file_data` (indexer `allowSkillsetToReadFileData: true`); outputs `text_sections` and `normalized_images`; document formats only; uses the attached Foundry resource for processing and billing. Exam era (Apr 2026): preview since Nov 2025 and GA in REST `2026-04-01`; one skill extracts Markdown and chunks it, keeps cross-page tables and lets chunks span pages (the Document Layout skill doesn't). Docs today: adds `chunkingProperties.method: semantic` and figure descriptions through `modelName` + `modelDeployment` (preview Jun 2026, GA in `2026-10-01`) and is recommended over Document Layout for new skillsets.",
+        "GenAI Prompt skill (`#Microsoft.Skills.Custom.ChatCompletionSkill`): calls a chat completion model for image verbalization or summaries; `responseFormat` supports `json_schema`; request timeout fixed at 30 seconds.",
+        "Custom Web API skill (`#Microsoft.Skills.Custom.WebApiSkill`): request and response use a top-level `values` array of records with `recordId` and `data`; the response adds `errors` and `warnings`; JSON only; defaults `timeout` 30 s (max 230 s), `batchSize` 1000; `authResourceId` for managed identity.",
+        "Billing: 20 free transactions per indexer per day; beyond that attach a Foundry resource in `cognitiveServices` - keyless `#Microsoft.Azure.Search.AIServicesByIdentity` + `subdomainUrl` (search identity needs Cognitive Services User; no region requirement; GA since Apr 2026, preview before) or key-based. Text Split, Text Merge, Shaper and Conditional are free. Docs today: OCR skill usage is moving from Azure Vision billing to Document Intelligence Read billing (after Nov 5, 2026).",
+        "Change detection is automatic for blobs; deletion detection needs a soft-delete policy on the data source from the first run (`NativeBlobSoftDeleteDeletionDetectionPolicy` or `SoftDeleteColumnDeletionDetectionPolicy`).",
+        "Knowledge store = skillset projections to Azure Storage: `tables`, `objects` (JSON blobs), `files` (images). It is not a knowledge base or knowledge source. Enrichment cache (preview) = indexer `cache` property that reuses unchanged enrichments."
+      ],
+      "note": "Setting `imageAction` adds image-extraction charges on the search service in addition to the OCR skill charge. The GenAI Prompt skill became GA in Apr 2026 (REST `2026-04-01`); the portal's Import data wizards were unified in Mar 2026.",
+      "ref": {"title": "Skills for extra processing during indexing", "url": "https://learn.microsoft.com/en-us/azure/search/cognitive-search-predefined-skills"}
+    },
+    {
+      "title": "Agentic retrieval (Foundry IQ) and connecting retrieval to agents",
+      "kind": "table",
+      "columns": ["Item", "Facts"],
+      "rows": [
+        ["Knowledge source", "Exam era (Apr 2026): search index, Azure blob, OneLake and Web are GA in REST `2026-04-01`; indexed and remote SharePoint are preview. Blob and OneLake sources generate data source + skillset + indexer + index. Docs today add file and Azure SQL (GA `2026-10-01`), indexed SharePoint GA, and preview remote kinds: Fabric data agent, Fabric ontology, MCP server, Work IQ"],
+        ["Knowledge base", "References knowledge sources by name; optional LLM in `models` for query planning and answer synthesis; lives on the same search service as its sources; the index needs a semantic configuration"],
+        ["`retrievalReasoningEffort`", "`minimal` (no LLM planning, queries all sources), `low` (one LLM planning pass with source selection), `medium` (adds an iterative retry; select regions). Exam era: needs `2025-11-01-preview` (GA `2026-04-01` is extractive only, no planning). Docs today: GA in `2026-10-01`; `auto` is a newer preview (Aug 2026)"],
+        ["`outputMode`", "`extractiveData` (default: grounding content + references) or `answerSynthesis` (LLM-written answer with `[ref_id:n]` citations; needs a model). Exam era: preview (`2025-11-01-preview`). Docs today: GA in `2026-10-01`"],
+        ["Pipeline", "Plan subqueries -> run in parallel (keyword, vector or hybrid) -> semantic rerank each -> merge; response contains `response`, `references`, `activity`; billed by tokens, not by query"],
+        ["Agent via MCP", "Foundry IQ = knowledge bases exposed to Foundry Agent Service (preview since Nov 2025). Endpoint `{search-endpoint}/knowledgebases/{kb}/mcp`; project connection that uses the project managed identity; MCP tool with `require_approval` and `allowed_tools` limited to `knowledge_base_retrieve`; project identity needs Search Index Data Reader. Docs today: `RemoteTool` connection + `MCPTool(server_label=, server_url=, require_approval=\"never\", allowed_tools=[\"knowledge_base_retrieve\"], project_connection_id=)`"],
+        ["Azure AI Search tool", "Agent tool that queries one index directly (no query planning); parameters `project_connection_id`, `index_name`, `query_type` (default `vector_semantic_hybrid`; also `simple`, `semantic`, `vector`, `vector_simple_hybrid`), `top_k` (default 5), `filter`. Docs today: Python class `AzureAISearchTool` with `AISearchIndexResource`"],
+        ["Per-user trimming", "Pass the user's token in `x-ms-query-source-authorization` (MCP tool `headers` fed by a structured input) so results are evaluated for that user (preview)"]
+      ],
+      "note": "Classic RAG = your code runs one hybrid + semantic query. Agentic retrieval = the knowledge base plans and runs several subqueries. Exam era (Apr 2026): the service is Azure AI Search and Foundry IQ names only the knowledge-base layer for agents; knowledge bases just became GA (extractive) while planning and answer synthesis were preview. Docs today: the whole service is branded Foundry IQ (Azure AI Search) since Nov 2026 and planning plus answer synthesis are GA in `2026-10-01`.",
+      "ref": {"title": "Agentic retrieval in Foundry IQ (Azure AI Search)", "url": "https://learn.microsoft.com/en-us/azure/search/agentic-retrieval-overview"}
+    }
+  ],
+  "triggers": [
+    {"when": "Convert documents to Markdown for RAG, with chart or figure descriptions and a summary", "pick": "Content Understanding `prebuilt-documentSearch`", "why": "RAG analyzer: layout Markdown, figure analysis and summary in one call"},
+    {"when": "Only OCR or layout is needed, lowest cost, no model deployment", "pick": "Content Understanding `prebuilt-read` or `prebuilt-layout`", "why": "Content-extraction analyzers need no LLM or embedding model"},
+    {"when": "Send low-confidence fields to human review, or show where a value came from", "pick": "`estimateFieldSourceAndConfidence: true` (or field-level `estimateSourceAndConfidence`)", "why": "Confidence and source grounding are opt-in for document analyzers"},
+    {"when": "A field must be one of a fixed list of values", "pick": "`method: classify` with `enum`", "why": "`extract` is verbatim and `generate` is free-form"},
+    {"when": "One file contains several document types that need different extraction", "pick": "`contentCategories` + `enableSegment: true`, with `analyzerId` per category", "why": "Split, classify and route in a single analyze call"},
+    {"when": "Unstructured or highly varied documents, inferred values, no labeled data", "pick": "Content Understanding custom analyzer (or `prebuilt-contract`)", "why": "Zero-shot schema-based extraction with confidence and grounding"},
+    {"when": "Same form layout every time, labeled samples, fast and cheap training", "pick": "Document Intelligence custom template model", "why": "Relies on a consistent visual template"},
+    {"when": "Labeled samples exist but layouts vary or documents are semi-structured", "pick": "Document Intelligence custom neural model", "why": "Combines layout and language features"},
+    {"when": "Must run disconnected, on-premises or air-gapped", "pick": "Document Intelligence containers", "why": "Only document-extraction option outside the cloud"},
+    {"when": "A few extra fields from a Document Intelligence prebuilt model, without training", "pick": "`queryFields` add-on (`features=queryFields&queryFields=...`)", "why": "Extends the prebuilt schema, up to 20 fields per request"},
+    {"when": "Reasoning across several input documents, cross-document validation, or use of reference (knowledge base) data", "pick": "Exam era (Apr 2026): Content Understanding pro mode (preview). Docs today: agentic mode (preview), `config.workflow: agentic`", "why": "Standard mode = single-file field extraction; pro mode added multi-step reasoning, multiple inputs and reference data. Agentic mode replaced it in Jul 2026 and takes one input file"},
+    {"when": "Combine keyword precision with vector similarity in one query", "pick": "Hybrid query: `search` + `vectorQueries`", "why": "Result sets are fused with Reciprocal Rank Fusion"},
+    {"when": "Promote the most relevant passages, or return captions and answers", "pick": "Semantic ranker: `queryType: semantic` + `semanticConfiguration` (vector `k` = 50)", "why": "L2 reranking of the top 50 results"},
+    {"when": "Users must only retrieve documents they are allowed to read", "pick": "`search.in` security filter on a filterable ID field (GA, any identity system); or native ACL / RBAC-scope filtering with `x-ms-query-source-authorization`", "why": "Document-level trimming happens at query time. Native ACL filtering was preview in the exam era (Apr 2026) and is GA in REST `2026-10-01`"},
+    {"when": "A skill produces output but the index field stays empty", "pick": "Add `outputFieldMappings` from the enriched node to the index field", "why": "`fieldMappings` only map source fields, before the skillset runs"},
+    {"when": "An agent must answer complex multi-part questions over several sources", "pick": "Foundry IQ knowledge base (agentic retrieval in Azure AI Search) through the MCP tool `knowledge_base_retrieve`", "why": "LLM query planning, parallel subqueries and reranking (planning was preview in the exam era); the Azure AI Search tool queries one index once"}
+  ],
+  "lookup": [
+    {"topic": "Content Understanding overview and API versions", "search": "Content Understanding overview features by version", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/overview"},
+    {"topic": "Prebuilt analyzer IDs", "search": "Content Understanding prebuilt analyzers", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/prebuilt-analyzers"},
+    {"topic": "Analyzer JSON: config, fieldSchema, methods", "search": "What is a Content Understanding analyzer", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/analyzer-reference"},
+    {"topic": "Model deployments and defaults", "search": "Content Understanding model deployment options modelDeployments", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/models-deployments"},
+    {"topic": "Content Understanding vs Document Intelligence vs LLM", "search": "Choose the right Foundry Tool for document processing", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/choosing-right-ai-tool"},
+    {"topic": "Classification and splitting", "search": "Content Understanding classification segmentation contentCategories", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/classifier"},
+    {"topic": "Document Intelligence add-ons", "search": "Document Intelligence add-on capabilities queryFields", "url": "https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/concept/add-on-capabilities"},
+    {"topic": "Search skills list and billing", "search": "Azure AI Search skills for extra processing during indexing (page titles now say Foundry IQ)", "url": "https://learn.microsoft.com/en-us/azure/search/cognitive-search-predefined-skills"},
+    {"topic": "Hybrid search, RRF and score ranges", "search": "Reciprocal Rank Fusion hybrid search scoring", "url": "https://learn.microsoft.com/en-us/azure/search/hybrid-search-ranking"},
+    {"topic": "Agentic retrieval, knowledge bases and sources", "search": "agentic retrieval knowledge base knowledge source", "url": "https://learn.microsoft.com/en-us/azure/search/agentic-retrieval-overview"}
+  ],
+  "flashcards": [
+    {"front": "Content Understanding: which API versions matter?", "back": "Exam era (Apr 2026): GA is `2025-11-01`; pro mode lives only in the preview `2025-05-01-preview`. Docs today: `2026-06-01-preview` (Jul 2026) adds agentic mode, synchronous Read/Layout, signature detection and in-page segmentation; the pro mode API is retired."},
+    {"front": "Which values are valid for `baseAnalyzerId` in a custom analyzer?", "back": "Only the four base analyzers: `prebuilt-document`, `prebuilt-image`, `prebuilt-audio`, `prebuilt-video`."},
+    {"front": "What do the three field `method` values mean?", "back": "`extract` = value as it literally appears (documents only); `generate` = value inferred or written by the model; `classify` = one value from `enum`. `method` is optional; the service chooses when it is omitted."},
+    {"front": "How do you get confidence scores and source grounding for fields?", "back": "Opt in with `estimateFieldSourceAndConfidence: true` in the analyzer `config`, or `estimateSourceAndConfidence: true` on a field. Document analyzers only. Fields then carry `confidence` (0-1), `source` (`D(page,x1,y1,...)`) and `spans`."},
+    {"front": "Does the analyzer `models` property hold deployment names?",     "back": "No. It holds catalog model names (for example `gpt-4.1`, `text-embedding-3-large`; today's docs also use aliases). They map to your deployments through `PATCH /contentunderstanding/defaults` (`modelDeployments`) or `modelDeployments` in an analyze request, which overrides the defaults."},
+        {"front": "Which Content Understanding prebuilt analyzers work with no model deployments configured?", "back": "`prebuilt-read` and `prebuilt-layout` (since Dec 2025; today's catalog also lists `prebuilt-digitalParse`): OCR and layout only, no LLM or embedding model."},
+    {"front": "Shape of a Content Understanding analyze call and result?", "back": "`POST ...:analyze` returns `202` + `Operation-Location`; poll `GET /contentunderstanding/analyzerResults/{id}` until `Succeeded`. `result.contents[]` items have `markdown` and `fields`; REST values are typed (`valueString`, `valueNumber`, `valueDate`, `valueArray`, `valueObject`)."},
+    {"front": "How do you split and classify a multi-document file in Content Understanding?", "back": "`config.contentCategories` (name + description, optional `analyzerId` to route) with `enableSegment: true`. Up to 200 categories per document analyzer; add an `other` category or everything is forced into a listed category."},
+    {"front": "Content Understanding standard mode vs pro mode (the exam outline says single-task and pro-mode)?", "back": "Exam era (Apr 2026): standard mode is the default, single-file field extraction (a single-file task in the classic portal); pro mode (preview, API `2025-05-01-preview`, documents only) adds multi-step reasoning, multiple input documents and an external knowledge base (reference data) for linking, enrichment and validation. Docs today: pro mode is retired; agentic mode (preview, `config.workflow: agentic`, one input file) replaces it."},
+    {"front": "Document Intelligence: current GA API and Python entry point?", "back": "v4.0, `2024-11-30`. Package `azure-ai-documentintelligence`; `DocumentIntelligenceClient.begin_analyze_document(model_id, AnalyzeDocumentRequest(url_source=url))`, then `poller.result()`."},
+    {"front": "Document Intelligence add-ons: which are free and which cost extra?", "back": "Free: `barcodes`, `languages`, `keyValuePairs`, searchable PDF (read model, `output=pdf`). Paid: `ocrHighResolution`, `formulas`, `styleFont`, `queryFields` (max 20 fields per request)."},
+    {"front": "Custom template vs custom neural model (Document Intelligence)?", "back": "Template: fixed visual layout, trains in minutes, cheapest. Neural: structured to unstructured documents with varying layout, higher accuracy, overlapping fields and signature detection. Both can start with 5 labeled samples."},
+    {"front": "What does Reciprocal Rank Fusion do and when is it used?", "back": "It merges parallel result sets (hybrid queries, multiple vector queries or fields) by summing `1/(rank + k)` per document, with k about 60. That k is not the vector query `k`. The fused value is `@search.score`."},
+    {"front": "Semantic ranker: input size, score range, and what are captions and answers?", "back": "Reranks the top 50 results of the BM25 or RRF ranking; `@search.rerankerScore` runs from 0 to 4. Captions and answers are verbatim extracts, not generated text. Needs `queryType=semantic` and `semanticConfiguration`."},
+    {"front": "`vectorFilterMode` values?", "back": "`preFilter` (default; filter during HNSW traversal, best recall, slower with selective filters), `postFilter` (filter after per-shard top-k; can return fewer than `k`), `strictPostFilter` (preview; filter the global top-k)."},
+    {"front": "Custom Web API skill response contract?", "back": "JSON with a top-level `values` array, one record per request `recordId`; each record has `recordId`, `data` (properties named after the skill outputs), `errors` and `warnings` (required, may be null). Order doesn't matter."},
+    {"front": "What happens when a skillset has no attached Foundry resource, and how do you attach one without keys?", "back": "Billable skills stop after 20 transactions per indexer per day (`Time Out` in execution history). Keyless:     `cognitiveServices` of type `#Microsoft.Azure.Search.AIServicesByIdentity` with `subdomainUrl`; the search identity needs Cognitive Services User (keyless billing: preview, then GA in Apr 2026)."},
+        {"front": "Agentic retrieval: reasoning efforts, output modes and MCP tool name?", "back": "`retrievalReasoningEffort`: `minimal` (no LLM planning), `low`, `medium` (iterative). `outputMode`: `extractiveData` (default) or `answerSynthesis` (needs an LLM). MCP tool: `knowledge_base_retrieve`. Exam era (Apr 2026): planning and synthesis need `2025-11-01-preview`. Docs today: GA in `2026-10-01`, plus `auto` effort (preview)."}
+  ],
+  "questions": [
+    {
+      "id": "d5-01",
+      "objective": "5.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You create a custom Content Understanding analyzer (API version `2025-11-01`) that is based on `prebuilt-document`. The field schema defines `PolicyNumber` and `ClaimAmount` without specifying a `method`, and the analyzer `config` already sets `returnDetails` to `true`. Values are extracted correctly from scanned claim forms, but no field in the result has a `confidence` or `source` property, so your app can't send uncertain values to a human reviewer. What should you do?",
+      "options": [
+        "Set `enableLayout` to `true` in the analyzer `config`",
+        "Set `estimateFieldSourceAndConfidence` to `true` in the analyzer `config`",
+        "Set `method` to `generate` in the definition of each field",
+        "Set `enableSegment` to `true` and define `contentCategories` in the analyzer `config`"
+      ],
+      "answer": [1],
+      "explanation": "Field confidence scores and source grounding are opt-in for document analyzers: set `estimateFieldSourceAndConfidence` in `config`, or `estimateSourceAndConfidence` on individual fields to limit cost. `returnDetails` only adds content-level detail, `enableLayout` is already `true` by default, and choosing a method doesn't add confidence or grounding. `enableSegment` with `contentCategories` splits and classifies content; it has nothing to do with field confidence.",
+      "ref": {"title": "What is a Content Understanding analyzer?", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/analyzer-reference"},
+      "tags": ["content-understanding", "confidence", "grounding"]
+    },
+    {
+      "id": "d5-02",
+      "objective": "5.2",
+      "type": "single",
+      "difficulty": 1,
+      "hot": true,
+      "stem": "You are building the ingestion step of a RAG solution. The source files are PDF reports that contain multi-column text, tables, charts and diagrams. Each file must be converted to Markdown that preserves the layout, includes textual descriptions of the charts and diagrams, and includes a one-paragraph summary of the document. You want to use a prebuilt Azure Content Understanding analyzer without defining a field schema. Which analyzer should you use?",
+      "options": [
+        "`prebuilt-layout`",
+        "`prebuilt-read`",
+        "`prebuilt-documentSearch`",
+        "`prebuilt-documentFieldSchema`"
+      ],
+      "answer": [2],
+      "explanation": "`prebuilt-documentSearch` is the RAG analyzer for documents: it returns layout-preserving Markdown, figure descriptions with chart and diagram analysis, and a one-paragraph summary, using your Foundry model deployments. `prebuilt-layout` returns layout and only locates figures - it generates no descriptions or summary and uses no model - and `prebuilt-read` is OCR text only. `prebuilt-documentFieldSchema` is a utility analyzer that proposes a field schema for a new document type.",
+      "ref": {"title": "Prebuilt analyzers in Azure Content Understanding in Foundry Tools", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/prebuilt-analyzers"},
+      "tags": ["content-understanding", "prebuilt-analyzers", "rag", "markdown"]
+    },
+    {
+      "id": "d5-03",
+      "objective": "5.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You are defining the `fieldSchema` of a custom Content Understanding analyzer for incident reports that are written as free text. The `Severity` field must always be returned as exactly one of the values `Low`, `Medium` or `High`. The reports never state the severity explicitly, so the value must be inferred from the narrative. How should you define the field?",
+      "options": [
+        "Set `method` to `extract` and list the three values in the field `description`",
+        "Set `method` to `classify` and list the three values in `enum`",
+        "Set `method` to `generate` and set `estimateSourceAndConfidence` to `true`",
+        "Define three `contentCategories` and set `enableSegment` to `true`"
+      ],
+      "answer": [1],
+      "explanation": "`classify` selects a value from a predefined set and is the method to pair with `enum`. `extract` returns values as they literally appear in the content, which can't work for an inferred value, and `generate` produces free-form output that isn't constrained to the three values. `contentCategories` with `enableSegment` classifies and splits whole files or segments for routing; it doesn't populate a field.",
+      "ref": {"title": "What is a Content Understanding analyzer?", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/analyzer-reference"},
+      "tags": ["content-understanding", "field-schema", "classify"]
+    },
+    {
+      "id": "d5-04",
+      "objective": "5.2",
+      "type": "dropdown",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "Loan packets arrive as single PDF files that contain several documents (invoices, bank statements and other pages). Each document can span multiple pages. You need one custom Content Understanding analyzer that splits each packet into its documents, classifies each document, sends invoices to `prebuilt-invoice` for field extraction, and returns only the results of that extraction. Complete the analyzer definition.",
+      "code": "{\n  \"baseAnalyzerId\": \"[[1]]\",\n  \"models\": { \"completion\": \"gpt-4.1\" },\n  \"config\": {\n    \"[[2]]\": true,\n    \"contentCategories\": {\n      \"invoice\": {\n        \"description\": \"Billing document that lists items, prices and totals\",\n        \"[[3]]\": \"prebuilt-invoice\"\n      },\n      \"bankStatement\": { \"description\": \"Account activity statement issued by a bank\" },\n      \"other\": { \"description\": \"Any other page\" }\n    },\n    \"omitContent\": true\n  }\n}",
+      "blanks": [
+        {"options": ["prebuilt-documentSearch", "prebuilt-document", "prebuilt-layout", "prebuilt-procurement"], "answer": 1},
+        {"options": ["segmentPerPage", "returnDetails", "enableSegment", "enableLayout"], "answer": 2},
+        {"options": ["baseAnalyzerId", "modelId", "analyzerName", "analyzerId"], "answer": 3}
+      ],
+      "explanation": "Custom analyzers can derive only from the four base analyzers, so a document classifier uses `prebuilt-document`. `enableSegment: true` splits the file into segments on logical boundaries by using the category descriptions; `segmentPerPage` would force one segment per page (breaking multi-page documents) and only applies when segmentation is enabled. A category's `analyzerId` links the analyzer that processes segments of that category - categories without it are classified only - and `omitContent: true` returns just the routed analysis.",
+      "ref": {"title": "Content Understanding classification/segmentation", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/classifier"},
+      "tags": ["content-understanding", "classification", "segmentation", "json"]
+    },
+    {
+      "id": "d5-05",
+      "objective": "5.2",
+      "type": "yesno",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You create a new Microsoft Foundry resource in a supported region and call the Content Understanding API (version `2025-11-01`) by using an identity that has the required role. The resource has no model deployments and no Content Understanding defaults are configured. A request that uses `prebuilt-invoice` fails. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "A request that uses `prebuilt-layout` succeeds on this resource without any model deployment.", "answer": true},
+        {"text": "After you deploy the required chat completion and embedding models, sending `PATCH /contentunderstanding/defaults` with a `modelDeployments` object that maps them to your deployment names allows the `prebuilt-invoice` request to succeed.", "answer": true},
+        {"text": "In a custom analyzer definition, `models.completion` must be set to the name of your Foundry model deployment.", "answer": false}
+      ],
+      "explanation": "`prebuilt-read` and `prebuilt-layout` need no language or embedding model, so they run even when no defaults exist. Analyzers that use generative models resolve the model names in their definitions through the resource-level `modelDeployments` defaults (set with `PATCH /contentunderstanding/defaults`) or through `modelDeployments` passed on the analyze request. The analyzer's `models` object holds catalog model names such as `gpt-4.1`, not deployment names; the service maps them to deployments at run time. (`prebuilt-read` and `prebuilt-layout` stopped needing a model in December 2025.)",
+      "ref": {"title": "Model deployment options for Content Understanding analyzers", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/models-deployments"},
+      "tags": ["content-understanding", "model-deployments", "defaults"]
+    },
+    {
+      "id": "d5-06",
+      "objective": "5.2",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You need to convert a PDF file that is available at a URL to Markdown by using the Content Understanding Python SDK (`azure-ai-contentunderstanding`), and then print the Markdown. Complete the code.",
+      "code": "from azure.ai.contentunderstanding import ContentUnderstandingClient\nfrom azure.ai.contentunderstanding.models import AnalysisInput\nfrom azure.identity import DefaultAzureCredential\n\nclient = ContentUnderstandingClient(\n    endpoint=endpoint, credential=DefaultAzureCredential()\n)\npoller = client.[[1]](\n    analyzer_id=\"prebuilt-documentSearch\",\n    inputs=[AnalysisInput(url=doc_url)],\n)\nresult = poller.[[2]]()\nprint(result.contents[0].[[3]])",
+      "blanks": [
+        {"options": ["analyze", "begin_analyze", "begin_analyze_document", "begin_create_analyzer"], "answer": 1},
+        {"options": ["status", "done", "result", "wait"], "answer": 2},
+        {"options": ["text", "content", "markdown", "fields"], "answer": 2}
+      ],
+      "explanation": "Analysis is a long-running operation: `begin_analyze` returns a poller, and `poller.result()` polls the operation until the `AnalysisResult` is available. Each item in `result.contents` exposes its Markdown rendering through `markdown`, while structured values are in `fields`. `begin_analyze_document` belongs to the Document Intelligence client, and `begin_create_analyzer` creates a custom analyzer.",
+      "ref": {"title": "Quickstart: Use Azure Content Understanding in Foundry Tools", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/quickstart/use-rest-api"},
+      "tags": ["content-understanding", "python-sdk", "markdown"]
+    },
+    {
+      "id": "d5-07",
+      "objective": "5.2",
+      "type": "order",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You have a new Microsoft Foundry resource that has no model deployments. You need to extract invoice fields from PDF files that are stored at URLs by calling the Content Understanding REST API (version `2025-11-01`) with the `prebuilt-invoice` analyzer. Not all of the listed actions are used. Which actions should you perform in sequence?",
+      "items": [
+        "Deploy a supported chat completion model and an embedding model to the Foundry resource",
+        "Send `PATCH /contentunderstanding/defaults` with a `modelDeployments` object that maps the models to your deployments",
+        "Send `POST /contentunderstanding/analyzers/prebuilt-invoice:analyze` with the file URL in `inputs`",
+        "Send `GET` requests to the URL in the `Operation-Location` response header until `status` is `Succeeded`",
+        "Read the values from `result.contents[0].fields`"
+      ],
+      "distractors": [
+        "Send `PUT /contentunderstanding/analyzers/prebuilt-invoice` with a `fieldSchema`",
+        "Label five sample invoices and train a custom model"
+      ],
+      "explanation": "Generative analyzers such as `prebuilt-invoice` run on your own Foundry model deployments, so you deploy the models and then map them once per resource with `PATCH /contentunderstanding/defaults`. Analysis is asynchronous: `POST ...:analyze` returns `202 Accepted` with an `Operation-Location` header (`/contentunderstanding/analyzerResults/{id}`) that you poll until `Succeeded`; the fields are then under `result.contents[]`. A prebuilt analyzer needs no `PUT` definition, and Content Understanding doesn't require labeled training samples.",
+      "ref": {"title": "Quickstart: Use Azure Content Understanding in Foundry Tools", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/quickstart/use-rest-api"},
+      "tags": ["content-understanding", "rest-api", "async"]
+    },
+    {
+      "id": "d5-08",
+      "objective": "5.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A legal team must process service agreements that arrive as free-form, multi-page PDF files with no common layout. For each agreement, the solution must return the contracting parties, the effective date, and an end date that is derived from the start date and the stated term. Each value needs a confidence score and a source location for reviewers. No labeled samples exist, and you must minimize build and maintenance effort. What should you use?",
+      "options": [
+        "An Azure Content Understanding analyzer with a field schema",
+        "An Azure Document Intelligence custom template model",
+        "An Azure Document Intelligence custom neural model",
+        "A Foundry chat model prompted with the output of `prebuilt-read`"
+      ],
+      "answer": [0],
+      "explanation": "Content Understanding analyzers (`prebuilt-contract` or a custom analyzer) are the recommended choice for unstructured documents: you describe fields in a schema with no labeled data, the service can infer values that aren't stated explicitly, and it returns confidence scores and grounding. Document Intelligence custom models need labeled training samples, and template models also need a fixed layout. Prompting a chat model yourself leaves OCR preprocessing, confidence scoring and grounding for you to build and maintain.",
+      "ref": {"title": "Choose the right Foundry Tool for document processing", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/choosing-right-ai-tool"},
+      "tags": ["content-understanding", "document-intelligence", "service-selection"]
+    },
+    {
+      "id": "d5-09",
+      "objective": "5.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A developer who has the Owner role on a Microsoft Foundry resource runs a Python script that creates a `ContentUnderstandingClient` with `DefaultAzureCredential` and then configures the default model deployments for Content Understanding. The call fails with an access denied error. Company policy forbids the use of API keys. You need to make the script work by assigning one additional built-in role to the developer on the resource. Which role should you assign?",
+      "options": [
+        "Cognitive Services Contributor",
+        "Contributor",
+        "User Access Administrator",
+        "Cognitive Services User"
+      ],
+      "answer": [3],
+      "explanation": "Requests that authenticate with Microsoft Entra ID need a role that grants data actions. Owner, Contributor and Cognitive Services Contributor are management-plane roles with no data actions, and User Access Administrator only manages role assignments, so the Content Understanding API rejects those tokens. Cognitive Services User grants the Cognitive Services data actions, and the SDK guidance states that it is required even for the owner of the resource. Since May 2026 the docs also list narrower built-in roles (Cognitive Services Content Understanding Reader, Contributor and Owner).",
+      "ref": {"title": "Azure AI Content Understanding client library for Python", "url": "https://learn.microsoft.com/en-us/python/api/overview/azure/ai-contentunderstanding-readme"},
+      "tags": ["content-understanding", "rbac", "keyless", "entra-id"]
+    },
+    {
+      "id": "d5-10",
+      "objective": "5.2",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "A Foundry resource hosts several custom Content Understanding analyzers whose definitions specify `gpt-4.1` in `models.completion`. The resource defaults map `gpt-4.1` to a pay-as-you-go deployment that an interactive chat app also uses. A nightly batch job that analyzes thousands of contracts causes 429 errors in the chat app. You deploy `gpt-4.1` again as a provisioned deployment named `gpt41-batch`. Only the batch job must use `gpt41-batch`. The analyzer definitions and the resource defaults must not change. What should you do?",
+      "options": [
+        "Send `PATCH /contentunderstanding/defaults` to map `gpt-4.1` to `gpt41-batch` before each batch run",
+        "Set `models.completion` to `gpt41-batch` in each analyzer definition",
+        "Include a `modelDeployments` object that maps `gpt-4.1` to `gpt41-batch` in each analyze request",
+        "Create copies of the analyzers that set `baseAnalyzerId` to `gpt41-batch`"
+      ],
+      "answer": [2],
+      "explanation": "`modelDeployments` can be passed in an individual analyze request, and those values override the resource-level defaults for that request only, which isolates the batch job. Changing the defaults affects every caller of the resource, and `models.completion` takes a catalog model name rather than a deployment name. `baseAnalyzerId` identifies a parent analyzer, not a model deployment.",
+      "ref": {"title": "Model deployment options for Content Understanding analyzers", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/models-deployments"},
+      "tags": ["content-understanding", "model-deployments", "capacity", "429"]
+    },
+    {
+      "id": "d5-11",
+      "objective": "5.2",
+      "type": "multi",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A custom Content Understanding analyzer that is based on `prebuilt-document` processes born-digital PDF purchase orders. The files contain no scanned pages and no mathematical notation. You need to reduce processing time without changing the fields that are extracted. Which two configuration changes should you make? Each correct answer presents part of the solution.",
+      "options": [
+        "Set `enableOcr` to `false`",
+        "Set `returnDetails` to `true`",
+        "Set `enableFigureAnalysis` to `true`",
+        "Set `enableFormula` to `false`",
+        "Set `estimateFieldSourceAndConfidence` to `true`"
+      ],
+      "answer": [0, 3],
+      "explanation": "`enableOcr` and `enableFormula` both default to `true`; the analyzer reference recommends disabling OCR for native digital PDFs and formula detection for general business documents to improve performance. The other options add work or payload: `returnDetails` significantly increases the response size, figure analysis adds processing, and confidence and grounding estimation adds cost and latency.",
+      "ref": {"title": "What is a Content Understanding analyzer?", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/analyzer-reference"},
+      "tags": ["content-understanding", "config", "performance"]
+    },
+    {
+      "id": "d5-12",
+      "objective": "5.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "An insurer must settle claims that each consist of three separate files: a claim form, a repair invoice and a policy document. The solution must accept all three files in one request, cross-check values between them, apply multi-step reasoning to decide whether the claim is covered, and consult a set of reference documents that describe the insurer's rules. You plan to use Azure Content Understanding. Which type of analyzer should you create?",
+      "options": [
+        "A standard mode analyzer with `generate` fields",
+        "A standard mode analyzer with `contentCategories`",
+        "A pro mode analyzer with reference data",
+        "The `prebuilt-documentSearch` analyzer"
+      ],
+      "answer": [2],
+      "explanation": "In the exam-era docs (April 2026), standard mode is the default single-file field-extraction mode (the exam outline calls it single-task), and pro mode (preview, API `2025-05-01-preview`, documents only) adds multi-step reasoning, multiple input documents and an external knowledge base of reference data for linking, enrichment and validation. `generate` fields and `contentCategories` still operate on one input file, and `prebuilt-documentSearch` only produces Markdown and a summary. Since July 2026 the docs replace pro mode with agentic mode (preview; `config.workflow` set to `agentic` in API `2026-06-01-preview`), which currently accepts one input file per request.",
+      "ref": {"title": "What's new in Azure Content Understanding in Foundry Tools?", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/whats-new"},
+      "tags": ["content-understanding", "pro-mode", "exam-era", "agentic-mode"]
+    },
+    {
+      "id": "d5-13",
+      "objective": "5.2",
+      "type": "single",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "You must extract the same 12 fields from supplier onboarding letters by using Azure Document Intelligence. The letters are semi-structured: every supplier uses its own layout, some values appear inside paragraphs, and new suppliers with new layouts are added every week. You have 40 labeled samples and need the highest possible accuracy. Which type of model should you build?",
+      "options": [
+        "A custom template model",
+        "A custom neural model",
+        "A custom classification model",
+        "A composed model of custom template models"
+      ],
+      "answer": [1],
+      "explanation": "Custom neural models combine layout and language features and are designed for structured, semi-structured and unstructured documents whose layout varies. Custom template models depend on a consistent visual template, so accuracy drops when layouts differ, and composing template models would require a trained template for every layout, which can't keep up with new suppliers. A classification model only identifies document types; it doesn't extract fields.",
+      "ref": {"title": "Document Intelligence custom models", "url": "https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/train/custom-model"},
+      "tags": ["document-intelligence", "custom-neural", "custom-template"]
+    }
+  ]
+}

@@ -1,0 +1,255 @@
+{
+  "repo": "https://github.com/haslam93/ai-103-exam-prep",
+  "siteUrl": "https://haslam93.github.io/ai-103-exam-prep/",
+  "outlineAsOf": "April 16, 2026",
+  "domains": [
+    {
+      "id": 1, "name": "Plan and manage an Azure AI solution", "short": "Plan and manage", "weight": [25, 30],
+      "objectives": [
+        { "id": "1.1", "name": "Choose the appropriate Foundry services for generative AI and agents", "bullets": [
+          "Choose an appropriate model for each task, including large language models (LLMs), small language models, multimodal models, and Foundry Tools",
+          "Choose the appropriate Foundry services for generative tasks, grounding, vector search, agent workflows, or multimodal processing",
+          "Choose an appropriate method for retrieval and indexing",
+          "Choose appropriate memory, tool, and knowledge integration services for agent solutions" ] },
+        { "id": "1.2", "name": "Set up AI solutions in Foundry", "bullets": [
+          "Design Azure infrastructure for AI apps and agent-based solutions",
+          "Choose appropriate deployment options",
+          "Configure model and agent deployments",
+          "Integrate Foundry projects with continuous integration and continuous deployment (CI/CD) pipelines" ] },
+        { "id": "1.3", "name": "Manage, monitor, and secure AI systems", "bullets": [
+          "Manage quotas, scaling, rate limits, and cost footprints for model and agent workloads",
+          "Monitor model performance, drift, safety events, and grounding quality",
+          "Monitor data ingestion quality, search index health, and relevance performance",
+          "Configure security, including managed identity, private networking, keyless credentials, and role policies" ] },
+        { "id": "1.4", "name": "Implement responsible AI across generative AI and agentic systems", "bullets": [
+          "Configure safety filters, guardrails, risk detection, and content moderation",
+          "Apply responsible AI instrumentation, including evaluators, safety evaluations, and explanation tooling",
+          "Implement auditing through trace logging, provenance metadata, and approval workflows",
+          "Govern agent behavior with oversight modes, constraints, and tool-access controls" ] }
+      ]
+    },
+    {
+      "id": 2, "name": "Implement generative AI and agentic solutions", "short": "GenAI and agents", "weight": [30, 35],
+      "objectives": [
+        { "id": "2.1", "name": "Build generative applications by using Foundry", "bullets": [
+          "Deploy and consume LLMs, small models, code models, and multimodal models",
+          "Implement retrieval-augmented generation (RAG) in an application",
+          "Design workflows, tool-augmented flows, and multistep reasoning pipelines",
+          "Evaluate models and apps, including detecting fabrications, relevance, quality, and safety",
+          "Integrate generative workflows into applications by using Foundry SDKs and connectors",
+          "Configure an application to connect to a Foundry project" ] },
+        { "id": "2.2", "name": "Build agents by using Foundry", "bullets": [
+          "Define agent roles, goals, conversation-tracking approach, and tool schemas",
+          "Build agents that integrate retrieval, function-calling, and conversation memory",
+          "Integrate agent tools, including APIs, knowledge stores, search, content understanding, and custom functions",
+          "Implement orchestrated multi-agent solutions",
+          "Build autonomous or semiautonomous workflows with safeguards and approval flow controls",
+          "Integrate monitoring into deployed agents, evaluate agent behavior, and perform error analysis" ] },
+        { "id": "2.3", "name": "Optimize and operationalize generative AI systems", "bullets": [
+          "Tune generation behavior, such as prompt engineering and adjusting model parameters",
+          "Implement model reflection, chain-of-thought evaluations, and self-critique loops",
+          "Set up observability by implementing tracing, token analytics, safety signals, and latency breakdowns",
+          "Orchestrate multiple models, flows, or hybrid LLM and rules engines" ] }
+      ]
+    },
+    {
+      "id": 3, "name": "Implement computer vision solutions", "short": "Vision", "weight": [10, 15],
+      "objectives": [
+        { "id": "3.1", "name": "Design and implement image- and video-generation solutions", "bullets": [
+          "Implement a solution that generates images from text prompts and reference media",
+          "Implement a solution that generates videos from text prompts and reference media",
+          "Configure image-editing workflows, including inpainting, mask-based edits, and prompt-driven modifications",
+          "Implement workflows to edit generated videos",
+          "Select and apply appropriate generation and editing controls provided by the platform" ] },
+        { "id": "3.2", "name": "Design and implement multimodal understanding workflows", "bullets": [
+          "Build a solution that analyzes visual context by using multimodal models",
+          "Configure apps to produce concise or detailed captions for single or multiple images",
+          "Implement a solution that enables question-answering grounded in visual evidence",
+          "Configure generation of alt-text and extended image descriptions aligned to accessibility guidelines",
+          "Implement visual understanding by configuring Azure Content Understanding in Foundry Tools to extract visual characteristics",
+          "Implement video analysis workflows to process and interpret video segments",
+          "Configure single-task and pro-mode Content Understanding pipelines",
+          "Implement solutions that identify objects, components, or regions within images or video" ] },
+        { "id": "3.3", "name": "Implement responsible AI for multimodal content", "bullets": [
+          "Implement filters to classify unsafe or disallowed visual content",
+          "Detect and mitigate indirect prompt injection by using embedded text in images",
+          "Enforce visual policy rules, such as applying watermarks, flagging prohibited symbols, upholding brand usage requirements, and detecting potentially inappropriate content" ] }
+      ]
+    },
+    {
+      "id": 4, "name": "Implement text analysis solutions", "short": "Text and speech", "weight": [10, 15],
+      "objectives": [
+        { "id": "4.1", "name": "Apply language model text analysis", "bullets": [
+          "Implement solutions to extract entities, topics, summaries, and structured JSON outputs by using generative prompting and Foundry Tools",
+          "Configure detection of sentiment, tone, safety issues, and sensitive content",
+          "Build solutions that translate text by using Azure Translator in Foundry Tools or LLM-powered translation flows",
+          "Customize language model outputs for domain tasks, such as compliance summarization and domain extraction" ] },
+        { "id": "4.2", "name": "Implement speech solutions", "bullets": [
+          "Implement workflows to convert speech to text and text to speech for agentic interactions",
+          "Integrate speech as an agent modality, including custom speech models",
+          "Enable multimodal reasoning from audio inputs",
+          "Translate speech into other languages by using language models and Foundry Tools" ] }
+      ]
+    },
+    {
+      "id": 5, "name": "Implement information extraction solutions", "short": "Information extraction", "weight": [10, 15],
+      "objectives": [
+        { "id": "5.1", "name": "Build retrieval and grounding pipelines", "bullets": [
+          "Ingest and index content, such as documents, images, audio, and video",
+          "Configure semantic search, hybrid search, and vector search for grounding",
+          "Implement enrichment by using custom or built-in skills for text, images, and layout",
+          "Configure RAG ingestion flow, including documents and using optical character recognition (OCR)",
+          "Connect retrieval pipelines directly to workflows and agent tools" ] },
+        { "id": "5.2", "name": "Extract content from documents", "bullets": [
+          "Extract information by using multimodal pipelines that combine OCR, layout analysis, and field extraction",
+          "Produce clean, grounded representations to use with agents and RAG by using Content Understanding",
+          "Implement analyzers for generating structured or markdown outputs for downstream reasoning by using Content Understanding" ] }
+      ]
+    }
+  ],
+  "plan": [
+    { "id": "p1", "min": "15 min", "title": "Read the era traps", "detail": "Rapid review, first tab. The exam is frozen at April 2026 and Learn has moved on since; this is where current knowledge can cost you points." },
+    { "id": "p2", "min": "30 min", "title": "Run the hot-topic drill", "detail": "Practice with the hot-topic filter. Use Reveal freely; the goal is to find gaps fast, not to score." },
+    { "id": "p3", "min": "120 min", "title": "Sit the full mock exam, timed", "detail": "Practise the pacing: reach the case study with 25 minutes left. Short on time? The half mock takes 60 minutes." },
+    { "id": "p4", "min": "30 min", "title": "Fix the blind spots", "detail": "On the results page, drill the answers you got wrong without flagging, then read the cheat sheet for your weakest skill area." },
+    { "id": "p5", "min": "15 min", "title": "Trigger-phrase flashcards", "detail": "Flashcards, Triggers deck. These are the requirement phrases that decide between two similar options." },
+    { "id": "p6", "min": "10 min", "title": "Skim the Learn lookup map, then stop", "detail": "Know what you would type into Learn search for each topic. Then close the laptop." },
+    { "id": "p7", "min": "10 min", "title": "Exam morning: flagged questions only", "detail": "Practice with the Flagged filter, plus one pass over the trigger phrases." }
+  ],
+  "intel": {
+    "facts": [
+      { "k": "120 min", "v": "official exam time; several candidates recall 100" },
+      { "k": "About 63 questions", "v": "reported; Microsoft publishes no count" },
+      { "k": "700 / 1000", "v": "to pass; scaled, not 70%" },
+      { "k": "Case study last", "v": "about 7 questions; sections lock behind you" },
+      { "k": "Learn is open", "v": "but slow; confirm details only" },
+      { "k": "Python and JSON", "v": "read SDK calls, tool schemas, structured outputs" }
+    ],
+    "format": [
+      ["Time", "120 minutes on the certification page. Microsoft gives associate exams 100 minutes without labs and 120 when labs may appear. Several 2026 candidates recall 100 minutes and no lab; the overview screens at the start tell you which form you have."],
+      ["Questions", "Microsoft publishes no count. Candidates report 63 to 64: roughly 53 standalone questions, a 3-question Yes/No solution series and one case study of about 7 questions."],
+      ["Passing score", "700 on a 1 to 1000 scale. Scores are scaled, so 700 is not 70% of the points. Multi-part items earn partial credit and a wrong part costs nothing."],
+      ["Formats", "Single answer, choose two or three, Yes/No statement grids, drop-down completion over Python SDK code or JSON, drag-and-drop ordering and matching, a solution series, a case study."],
+      ["What locks", "A case study can't be reopened once you move past it. In a solution series each answer is final the moment you give it, and a fix that only partly solves the problem is a No."],
+      ["Case study", "Reported at the end, after every standalone question. Earlier Microsoft exams usually put it first."],
+      ["Open book", "Microsoft Learn is available. The clock keeps running, and candidates say pages load slowly in the exam browser."],
+      ["Retakes", "24 hours after a first fail, then 14 days between attempts, with at most five attempts in 12 months."]
+    ],
+    "strategy": [
+      "Reserve **20 to 25 minutes** for the case study before you start. On a 120-minute form that leaves about 1 minute 40 seconds per standalone question, and about 1 minute 20 on a 100-minute form.",
+      "Use two passes. Answer everything first, flag anything that takes more than two minutes, and return only if time remains. A wrong answer costs nothing, so never leave a blank.",
+      "Read the last sentence of a long scenario first. The constraint (lowest cost, least privilege, no code changes, data stays in region) usually removes two options before you read the rest.",
+      "When the final two options look alike, find the one word that differs and ask which stated constraint it serves.",
+      "Clear your flags before you finish the standalone section. You can't return once the case study opens.",
+      "In the solution series, judge each solution on its own. Several can be Yes, or none.",
+      "In the case study, read the requirements tab, then the question, then go back to the scenario for the exact constraint."
+    ],
+    "hot": [
+      { "title": "Azure Content Understanding", "src": "first-hand report: several questions", "why": "Older AI-102 material skips it. Know analyzers, field methods (extract, generate, classify), standard versus pro mode and what the result contains.", "match": "content understanding|analyzer" },
+      { "title": "Prompt Shields and prompt injection", "src": "first-hand report: a handful of questions", "why": "User prompt attacks (jailbreak) versus document attacks (indirect injection), spotlighting, and where the shield sits in the architecture.", "match": "prompt shield|jailbreak|indirect (prompt )?(attack|injection)|document attack|spotlight|prompt injection" },
+      { "title": "Keyless auth, managed identity and least-privilege roles", "src": "first-hand report: a theme across several questions", "why": "Connections and authentication ran on Microsoft Entra ID, not API keys. Know `DefaultAzureCredential`, the token scope and which Foundry or data-plane role is the minimum.", "match": "keyless|managed identit|DefaultAzureCredential|RBAC|Foundry (User|Owner|Agent Consumer|Project Manager|Account Owner)|Search Index Data|disableLocalAuth|key-based auth|least.privilege" },
+      { "title": "Responses API with the Python SDK", "src": "first-hand report", "why": "Read a short snippet and say what each call does: state, streaming, tools, structured output.", "match": "responses\\.create|Responses API|previous_response_id|get_openai_client|output_text" },
+      { "title": "JSON Schema for structured outputs and tool definitions", "src": "first-hand report", "why": "Strict-mode rules (every field required, `additionalProperties` false, null for optional) and how a function tool is described.", "match": "json_schema|structured output|additionalProperties|\"strict\"|strict mode|tool definition|function tool|function calling" },
+      { "title": "Content filter categories and thresholds", "src": "first-hand report: reliable points", "why": "Hate, sexual, violence and self-harm, the severity levels, and what each setting blocks. Watch the wording: the older severity threshold and today's blocking level use Low and High in opposite senses.", "match": "content filter|severity|guardrail|blocklist|protected material|harm categor" },
+      { "title": "Groundedness and evaluators", "src": "first-hand report: comes up fairly often", "why": "Measuring fabrication: which evaluator, which inputs it needs, and how to run it from the SDK.", "match": "groundedness|evaluator|hallucinat|fabricat|evaluate\\(" },
+      { "title": "Agents: tools, MCP approval and memory", "src": "outline plus reports", "why": "Foundry Agent Service replaced Prompt flow as the centre of the exam. Tool choice, `allowed_tools`, `require_approval`, conversations and memory scope.", "match": "MCP|allowed_tools|require_approval|memory|agent_reference|PromptAgentDefinition|create_version|conversation" },
+      { "title": "RAG on Azure AI Search", "src": "first-hand report", "why": "Hybrid search merged by Reciprocal Rank Fusion, semantic ranking on top, vector fields, and security trimming with filters.", "match": "hybrid|semantic rank|RRF|Reciprocal Rank|vector quer|vectorQueries|search\\.in|security trim" },
+      { "title": "Private networking for Foundry and agents", "src": "first-hand report", "why": "Private endpoints, disabling public access, and what changes for tools when the agent runs on a private network.", "match": "private endpoint|virtual network|VNet|public network access|network isolation|private link" },
+      { "title": "Quotas, 429s and model router", "src": "vendor analysis of Learn", "why": "What counts toward TPM, why a burst gets throttled inside a minute, provisioned versus standard, and the router's effective context window.", "match": "quota|429|rate limit|TPM|tokens per minute|PTU|provisioned|model router" },
+      { "title": "Tracing and monitoring with Application Insights", "src": "outline plus reports", "why": "The monitoring dashboard reads from the Application Insights resource connected to the project. Know how traces get there.", "match": "tracing|trace|Application Insights|OpenTelemetry|monitoring dashboard" }
+    ],
+    "styles": [
+      "Scenarios are long. One candidate called the length exhausting; another said the final two options were confusingly similar.",
+      "You read Python and JSON rather than write it: complete a call with drop-downs, pick the right parameter, or say what a snippet does.",
+      "Services are tested as building blocks for an app or agent (how does this PDF get into the model's context?), not as isolated API trivia.",
+      "Questions track the documentation closely and mostly cover GA features. Commonly used preview features can appear.",
+      "The wording is April 2026 Foundry vocabulary: Azure AI Search, Azure AI User, Content Understanding pro mode. Prompt flow appeared in the beta but is not in the outline.",
+      "Code exposure varies by form. One candidate saw little code; another reported several code-completion items."
+    ],
+    "learn": [
+      "Use it to confirm an exact parameter, role name or default. Don't try to learn a topic there.",
+      "Pages load slowly. One candidate stopped looking things up and flagged questions instead; another had time left over but found lookups less useful than expected.",
+      "Search with the exact identifier from the question (`require_approval`, `vectorFilterMode`, `Foundry Agent Consumer`) rather than a description.",
+      "Answer and flag first. Look things up at the end, and cap each lookup at about two minutes."
+    ],
+    "sources": [
+      { "title": "Microsoft: Study guide for Exam AI-103", "url": "https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ai-103", "note": "skills measured as of April 16, 2026" },
+      { "title": "Microsoft: Azure AI Apps and Agents Developer Associate", "url": "https://learn.microsoft.com/en-us/credentials/certifications/azure-ai-apps-and-agents-developer-associate/", "note": "120 minutes, proctored, ten languages" },
+      { "title": "Microsoft: Exam duration and exam experience", "url": "https://learn.microsoft.com/en-us/credentials/support/exam-duration-exam-experience", "note": "100 versus 120 minutes, Learn access" },
+      { "title": "Microsoft: Course AI-103T00 and its four learning paths", "url": "https://learn.microsoft.com/en-us/training/courses/ai-103t00", "note": "generative AI apps, AI agents, natural language, visual data" },
+      { "title": "Sameera Perera: I Passed the AI-103 Exam", "url": "https://sameeraman.github.io/blog/2026/07/20/azure-ai103-exam-review/", "note": "July 2026: 63 questions, case study last, topic list" },
+      { "title": "Lena Nadir: How I Passed the Azure AI Apps and Agents Exam", "url": "https://www.lena-nadir.dev/blog/en/ai-103-exam-experience/", "note": "beta sitting: 54 + 3 + 7 questions, Responsible AI emphasis" },
+      { "title": "Jamie Maguire: Passing AI-103", "url": "https://jamiemaguire.net/index.php/2026/09/12/passing-the-azure-ai-apps-and-agents-developer-associate-ai-103/", "note": "missed by 25 points with no preparation, then passed; recall questions were the hard part" },
+      { "title": "Mastery Exam Prep: AI-103 exam experience", "url": "https://masteryexamprep.com/exams/microsoft/ai-103/exam-experience/", "note": "summary of ten public accounts, eight of them r/AzureCertification threads" },
+      { "title": "Hatcharoo: AI-103 study guide", "url": "https://www.hatcharoo.com/blog/ai-103-study-guide/", "note": "thirteen Foundry facts with Learn links, format notes" },
+      { "title": "Reddit: Review of just passed AI-103 (non-beta)", "url": "https://www.reddit.com/r/AzureCertification/comments/1uchhri/review_of_just_passed_ai103_nonbeta/", "note": "verbose scenarios, Python and JSON" },
+      { "title": "Reddit: Cleared AI-103 certification", "url": "https://www.reddit.com/r/AzureCertification/comments/1wwmqyd/cleared_ai103_certification/", "note": "time pressure, code completion" },
+      { "title": "Reddit: Passed AI-103 by a very small margin", "url": "https://www.reddit.com/r/AzureCertification/comments/1wuwhlx/passed_ai103_by_a_very_small_margin_710700/", "note": "similar final options" },
+      { "title": "Reddit: I just passed AI-103 with 880/1000", "url": "https://www.reddit.com/r/AzureCertification/comments/1vn9nmk/i_just_passed_ai_103_with_8801000/", "note": "plenty of time, lookups of limited use" }
+    ],
+    "caveat": "Reddit blocks automated readers, so its threads are represented here through the Mastery Exam Prep summary that read them; the links open the original posts. Candidates don't publish real exam questions, and none appear in this app. Every question here is original, written against current Microsoft Learn documentation."
+  },
+  "deltas": [
+    { "group": "era", "old": "Azure AI Search", "now": "Foundry IQ (Azure AI Search), renamed November 2026",
+      "note": "Same service, endpoints, SDKs and role names. Questions will say Azure AI Search; Learn pages and search results now say Foundry IQ. In April, Foundry IQ meant only the knowledge-base layer that agents use for agentic retrieval." },
+    { "group": "era", "old": "Azure AI User, Azure AI Project Manager, Azure AI Account Owner, Azure AI Owner", "now": "Foundry User, Foundry Project Manager, Foundry Account Owner, Foundry Owner (renamed mid-2026, same role IDs)",
+      "note": "Treat each pair as one role. Azure AI Developer kept its name and applies to hubs and Azure Machine Learning, so it is a distractor for Foundry projects." },
+    { "group": "era", "old": "Content filter severity threshold: Low filters low, medium and high (strictest); High filters high only", "now": "Guardrail blocking level: Low blocks high only (least restrictive); High blocks low, medium and high",
+      "note": "The labels are reversed between the two wordings. Medium, the default, blocks medium and high in both. Read the noun in the option, threshold or blocking level, before you pick." },
+    { "group": "era", "old": "Content Understanding standard mode (the outline's single-task) and pro mode: multi-step reasoning, several input documents, reference data, documents only", "now": "Pro mode is retired. Its successor is agentic mode (preview since July 2026, `config.workflow: agentic`, one input file)",
+      "note": "The outline names pro mode, so answer in April terms. Reasoning across several documents or validating against reference data means pro mode. Single-file field extraction means standard." },
+    { "group": "era", "old": "Publish an agent as an Agent Application; callers get Azure AI User on the application; unpublished agents share the project's agent identity", "now": "Every agent gets its own endpoint and Microsoft Entra agent identity at creation; callers get Foundry Agent Consumer; Agent Applications are labelled legacy",
+      "note": "An option that mentions an Agent Application describes the exam-era publishing model. It is not a trick." },
+    { "group": "era", "old": "Foundry workflows (preview): visual or YAML multi-agent flows with if/else and ask-a-question nodes", "now": "The workflow designer retires December 1, 2026 in favour of Microsoft Agent Framework",
+      "note": "Still fair game, because the outline says workflows and approval flow controls. Human in the loop there is a question node followed by a branch." },
+    { "group": "era", "old": "Agent bound in code with `extra_body` carrying an `agent_reference` (older samples use the key `agent`)", "now": "`project.get_openai_client(agent_name=...)` since SDK 2.1.0 (April 20, 2026)",
+      "note": "Recognize both. The stable parts are `create_version`, `PromptAgentDefinition`, conversations and `responses.create`." },
+    { "group": "era", "old": "Token scope `https://cognitiveservices.azure.com/.default` in many Azure OpenAI samples", "now": "`https://ai.azure.com/.default` in the keyless how-to",
+      "note": "Accept whichever scope an item offers. The tested pattern is the token provider passed as `api_key` to the plain `OpenAI` client on `/openai/v1/`." },
+    { "group": "era", "old": "Local evaluation with the `azure-ai-evaluation` package: evaluator classes and `evaluate()`", "now": "Cloud evaluation through `openai_client.evals` with `azure_ai_evaluator` and `builtin.*` names; the local package is labelled classic",
+      "note": "Evaluator names, inputs and score scales are the same in both. Groundedness needs `response` and `context`; Relevance needs `query` and `response`." },
+    { "group": "era", "old": "`azure-ai-inference` (`ChatCompletionsClient` on `/models`) and Azure OpenAI On Your Data still available", "now": "Retired on August 26 and October 14, 2026",
+      "note": "Both can appear as options. Judge them on fit, not on being retired. The current answers are the `OpenAI` client on the v1 endpoint, and a knowledge base or classic RAG." },
+    { "group": "era", "old": "Translator v3 (`api-version=3.0`, `to=` query parameters, detect, dictionary, transliterate) plus an LLM-capable preview version", "now": "`2026-06-06` is GA with an `inputs` and `targets` body, `deploymentName`, `tone` and `gender`; Detect, BreakSentence and Dictionary are gone",
+      "note": "v3 shapes are what the exam most likely shows. Tone, gender or a GPT deployment means the LLM-capable version on a Foundry resource." },
+    { "group": "era", "old": "Azure Language sentiment, summarization, key phrases and CLU as regular features", "now": "Labelled legacy and retiring March 31, 2029; new work is pointed at Foundry models",
+      "note": "Either can be the right answer. A prebuilt deterministic detector (PII, language, entities) points to Azure Language. Tone, free-form or schema-shaped output points to a model with structured outputs." },
+    { "group": "era", "old": "Content Credentials (a signed C2PA manifest) on generated images", "now": "Also invisible watermarks and a Content Provenance Detection API (August 2026)",
+      "note": "For provenance questions the exam-era answer is Content Credentials, which are attached automatically with no setup." },
+    { "group": "era", "old": "Model router called through Chat Completions; unsupported parameters such as `temperature` are dropped", "now": "Also `model: auto`, native Responses support and a per-request `routing_config` (November 2026)",
+      "note": "Stable facts: the effective context window is the smallest underlying model, a model subset both restricts routing and provides failover, and the response names the model that answered." },
+    { "group": "era", "old": "Agentic retrieval: knowledge bases GA, LLM query planning and answer synthesis in preview", "now": "All GA in REST `2026-10-01`",
+      "note": "The concepts are unchanged: `minimal` effort skips LLM planning, `low` and `medium` plan subqueries, and the output mode is `extractiveData` or `answerSynthesis`." },
+    { "group": "era", "old": "Hosted agents, the A2A tool and tool-level guardrail intervention points in preview", "now": "Hosted agents GA (July 2026), A2A GA (August 2026); agent memory is still preview",
+      "note": "Commonly used preview features can be tested. Don't rule an option out because it was preview in April." },
+
+    { "group": "ai102", "old": "Azure AI Foundry or Azure AI Studio; Azure OpenAI Service", "now": "Microsoft Foundry; Azure OpenAI in Foundry Models; docs under `/azure/foundry/`",
+      "note": "Question text uses the Foundry names throughout." },
+    { "group": "ai102", "old": "Azure AI services, Cognitive Services", "now": "Foundry Tools: Azure Language, Speech, Translator, Vision, Document Intelligence, Content Understanding and Content Safety, each \"in Foundry Tools\"",
+      "note": "They are tested as building blocks for an app or agent, not as standalone API trivia." },
+    { "group": "ai102", "old": "An API key in an app setting", "now": "Microsoft Entra ID: managed identity, `DefaultAzureCredential`, a data-plane role, then `disableLocalAuth`",
+      "note": "Owner and Contributor have no data actions. Foundry Agent Service and evaluations accept Entra ID only." },
+    { "group": "ai102", "old": "`AzureOpenAI` client with an `api_version`, calling `chat.completions.create`", "now": "Plain `OpenAI` client on `/openai/v1/` with no `api-version`, calling `responses.create`",
+      "note": "Chat Completions shapes are the standard distractors: `response_format` versus `text.format`, `tool_calls` and `tool_call_id` versus `function_call` and `call_id`, a nested `function` object versus a flat tool, an `image_url` object versus `input_image`." },
+    { "group": "ai102", "old": "Assistants-style agents: `create_agent`, threads, messages, runs, `submit_tool_outputs`", "now": "`create_version` with a `PromptAgentDefinition`, conversations, and `responses.create`",
+      "note": "Your code drives the tool loop: read `function_call` items, return `function_call_output` items. `requires_action` belongs to the old runs API." },
+    { "group": "ai102", "old": "Prompt flow for orchestration and evaluation", "now": "Foundry Agent Service, workflows and Microsoft Agent Framework; Prompt flow is classic-only and retires April 20, 2027",
+      "note": "Prompt flow appeared in the beta but is not in the April outline." },
+    { "group": "ai102", "old": "Semantic Kernel or AutoGen orchestration; connected agents", "now": "Microsoft Agent Framework orchestrations: sequential, concurrent, handoff, group chat, Magentic; the A2A tool replaces connected agents",
+      "note": "Handoff transfers ownership with no manager. Group chat and Magentic have a manager. Agent-as-tool returns control to the caller." },
+    { "group": "ai102", "old": "Document Intelligence custom models for every extraction job", "now": "Content Understanding analyzers: a field schema with `extract`, `generate` and `classify`; Markdown plus fields with confidence and grounding",
+      "note": "You bring the model deployments. Document Intelligence still wins for labelled fixed-layout forms and for containers." },
+    { "group": "ai102", "old": "Vision means Custom Vision, Face, spatial analysis and Image Analysis", "now": "Image and video generation (GPT-image, Sora 2), multimodal chat, Content Understanding for images and video, visual content safety",
+      "note": "DALL-E 3 was retired in March 2026 and Image Analysis 4.0 is deprecated." },
+    { "group": "ai102", "old": "Language means LUIS or CLU intents and question answering bots", "now": "LLM-first analysis with structured outputs, with Language, Translator and Speech as tools; Voice Live and the Realtime API for voice agents",
+      "note": "Speech and Language also ship as MCP servers that an agent can call." },
+    { "group": "ai102", "old": "Knowledge mining means skillsets and a knowledge store", "now": "Integrated vectorization, hybrid search fused with RRF, the semantic ranker on top, and agentic retrieval through knowledge bases",
+      "note": "A knowledge store (projections to storage) is not a knowledge base (agentic retrieval)." },
+    { "group": "ai102", "old": "Hub-based projects and a project connection string", "now": "A Foundry resource with projects and a project endpoint: `https://<resource>.services.ai.azure.com/api/projects/<project>`",
+      "note": "New agent features exist only in Foundry projects. Hubs are the classic experience." },
+    { "group": "ai102", "old": "Content filters on prompts and completions only", "now": "Guardrails and controls: Prompt Shields for user and document attacks, protected material, PII, task adherence; agents add tool call and tool response intervention points",
+      "note": "An agent's guardrail fully overrides its model's. Document attack detection is off by default." },
+    { "group": "ai102", "old": "Standard or Provisioned deployments", "now": "Global, Data Zone and regional variants of Standard, Provisioned and Batch, plus Developer for fine-tuned models",
+      "note": "Where processing may happen decides the answer: Global is anywhere, Data Zone stays in the EU or US, regional stays in one region." }
+  ]
+}

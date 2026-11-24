@@ -1,0 +1,614 @@
+{
+  "part": "d1a",
+  "domain": 1,
+  "cheatsheet": [
+    {
+      "title": "Foundry Models deployment types (Serverless API)",
+      "kind": "table",
+      "columns": ["Type (SKU code)", "Inference processed", "Billing", "Pick when"],
+      "rows": [
+        ["Global Standard (`GlobalStandard`)", "Any Azure region", "Pay-per-token", "Default start: new models land here first, lowest price, highest default quota"],
+        ["Global Provisioned (`GlobalProvisionedManaged`)", "Any Azure region", "Reserved PTU (hourly or reservation)", "Predictable high throughput and lower latency variance, no residency constraint"],
+        ["Global Batch (`GlobalBatch`)", "Any Azure region", "50% less than Global Standard", "Large async jobs, 24-hour target turnaround, separate enqueued token quota"],
+        ["Data Zone Standard (`DataZoneStandard`)", "Within the Microsoft-defined data zone (US or EU; docs today also list APAC)", "Pay-per-token", "Data-zone compliance with higher default quota than geography-based types"],
+        ["Data Zone Provisioned (`DataZoneProvisionedManaged`)", "Within the data zone", "Reserved PTU", "Data-zone residency plus reserved throughput; higher availability than regional"],
+        ["Data Zone Batch (`DataZoneBatch`)", "Within the data zone", "50% discount", "Large async jobs that must stay in the data zone"],
+        ["Standard (`Standard`)", "Within the Azure geography", "Pay-per-token", "Geography compliance, low-to-medium bursty volume"],
+        ["Regional Provisioned (`ProvisionedManaged`)", "Within the Azure geography", "Reserved PTU", "Geography compliance plus reserved throughput"],
+        ["Developer (`DeveloperTier`)", "Any Azure region", "Pay-per-token", "Fine-tuned model evaluation only: 24-hour lifetime, auto-deleted, no SLA, no residency guarantee"]
+      ],
+      "note": "Traps: data at rest always stays in the resource's geography - the type only changes where inference is processed. New models arrive Global first, then Data Zone, then geography-based (last, no guaranteed date). PTU quota is per subscription, region and deployment type and does NOT guarantee capacity; reservations (1 month or 1 year) are only a billing discount, so create the deployment first and buy the reservation afterwards. Azure Policy can deny a `sku.name` on `Microsoft.CognitiveServices/accounts/deployments`. Docs today also mention Flex and Priority processing tiers on Global Standard.",
+      "ref": {"title": "Deployment types for Microsoft Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types"}
+    },
+    {
+      "title": "Deployment options, catalog categories, versions and lifecycle",
+      "kind": "table",
+      "columns": ["Topic", "What to know"],
+      "rows": [
+        ["Serverless API (preferred)", "All Foundry Models sold by Azure plus select partner models (for example Anthropic, Mistral, Cohere, Meta). Deployed on the Foundry resource. Token or PTU billing. Built-in, customizable content filtering; Microsoft Entra ID or key auth; private networking."],
+        ["Managed compute", "Open-source, partner and custom-weight models (for example the Hugging Face collection) on dedicated capacity billed by time, not tokens. No built-in content filtering - call Azure AI Content Safety yourself."],
+        ["Models sold by Azure", "Hosted and sold by Microsoft under Microsoft Product Terms, Microsoft support and SLAs, billed on Azure meters. No Azure Marketplace subscription needed."],
+        ["Models from partners and community", "Provider-supported. Pay-per-token offers are billed through Azure Marketplace, so the deployer needs Marketplace subscribe permissions (Contributor or Owner on the subscription includes them)."],
+        ["Upgrade policy: Opt out of automatic model version upgrades", "You upgrade manually. When the version is retired the deployment stops accepting requests and returns errors."],
+        ["Upgrade policy: Upgrade once new default version becomes available", "Moves to the new default version automatically (Azure gives at least two weeks notice before a version becomes default)."],
+        ["Upgrade policy: Once the current version expires", "Stays on the current version until it is retired, then upgrades automatically."],
+        ["Lifecycle stages (docs today)", "Preview -> Generally Available -> Legacy (optional) -> Deprecated (existing customers only) -> Retired (inference returns `410 Gone`). Standard GA lifecycle is 18 months."],
+        ["Preview models", "Not for production. At least 30 days notice, then deployments are force-upgraded to a newer preview or the GA version, or retired."],
+        ["Role to create deployments", "Cognitive Services Contributor (or equivalent) on the Foundry resource."]
+      ],
+      "note": "Upgrade policies apply to Standard deployment types; provisioned deployments are migrated manually. Managed compute is mid-transition in the docs: the Foundry Models overview (older text) says it needs a hub-based (classic) project and VM quota, while the newer deployment overview shows it on the Foundry project endpoint. Treating the hub-based statement as the exam-era answer is my inference, not a dated fact.",
+      "ref": {"title": "Deployment overview for Microsoft Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/deployments-overview"}
+    },
+    {
+      "title": "Pick the model or Foundry Tool for the task",
+      "kind": "table",
+      "columns": ["Need", "Pick", "Why / watch out"],
+      "rows": [
+        ["Deep reasoning, complex generation, long context", "Large language model (for example GPT-5, Mistral Large)", "Most capable; highest cost and latency"],
+        ["High volume, low latency, low cost on common NLP tasks; low-end or edge hardware", "Small language model (Phi-4 family, for example `Phi-4-mini-instruct`)", "Speed and cost matter more than the hardest reasoning"],
+        ["Math, coding, strategy, multi-step problem solving", "Reasoning model (catalog capability filter: reasoning)", "More latency and cost; may not support parameters such as `temperature`"],
+        ["Text plus image input (captions, visual Q&A)", "Multimodal chat model (for example GPT-4.1)", "Check supported input types on the model card"],
+        ["Vectors for semantic search and RAG", "Embedding model (`text-embedding-3-large`, `text-embedding-3-small`, Cohere embed)", "Returns vectors, not text; content filtering is not available for embedding models"],
+        ["Mix of easy and hard prompts behind one endpoint, lower cost", "Model router", "Per-prompt routing; see the next section"],
+        ["Unstructured or varied documents, inferred fields, no labels; image, audio, video", "Azure Content Understanding analyzer (prebuilt or custom, zero-shot schema)", "Confidence scores and grounding are built in"],
+        ["Standard structured forms (invoice, receipt, ID, tax); labeled custom extraction", "Azure Document Intelligence prebuilt or custom model", "Custom neural model from as few as 5 labeled samples; containers are the only on-premises or air-gapped option"],
+        ["OCR or layout extraction only", "Content Understanding `prebuilt-read` or `prebuilt-layout`", "Docs: lower cost and richer layout output"],
+        ["Predictable, cost-effective text analysis, translation or speech", "Azure Language, Azure Translator, Azure Speech in Foundry Tools", "Prebuilt APIs are more predictable and cost-effective than prompting an LLM for the same task"],
+        ["Full control of prompts and models for a niche pipeline", "Build your own on a Foundry model", "You own OCR preprocessing, chunking, confidence scoring and scaling"]
+      ],
+      "note": "Foundry Tools is the name the exam outline uses for the former Azure AI services. Some tool APIs (for example Translator) are available only at the Foundry resource level, not at the project scope.",
+      "ref": {"title": "Choose the right Foundry Tool for document processing", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/choosing-right-ai-tool"}
+    },
+    {
+      "title": "Model router essentials (exam era vs docs today)",
+      "kind": "bullets",
+      "bullets": [
+        "Exam era (GA version `2025-11-18`, released Nov 2025): you deploy `model-router` and call it by deployment name with the Chat Completions API; it picks the underlying model for each prompt, and the response `model` field names the model that answered.",
+        "Routing modes (called routing profiles at launch): Balanced (default; cheapest model within about 1-2% of the best quality), Quality (best model, ignores cost), Cost (wider 5-6% quality band).",
+        "Custom model subset: restrict which underlying models are eligible (cost, compliance, context window).",
+        "Deployment types: Global Standard or Data Zone Standard. A data-zone requirement means a Data Zone Standard `model-router` deployment.",
+        "Claude models must first be deployed in the same Foundry resource. Automatic failover to the next-best model was added in March 2026.",
+        "Limits: effective context window is the smallest in the pool (fix: model subset of large-context models); text and image input only, routing decision uses the text only, no audio; unsupported optional parameters are dropped.",
+        "One content filter and one rate limit on the router deployment cover every underlying model.",
+        "Docs today (added November 2026, after the exam freeze): Auto (`model` set to `auto`, preview, no deployment, always processed as Global Standard), native Responses API support, Messages API (preview), Monitor tab with cost baselines, per-request routing controls (preview)."
+      ],
+      "note": "Do not expect `auto` on the exam. If an item mixes simple and complex prompts and asks for lower cost with no model-selection code, the answer is a model router deployment.",
+      "ref": {"title": "What's new in model router in Microsoft Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/whats-new-model-router"}
+    },
+    {
+      "title": "Retrieval, knowledge, memory and tools for agents",
+      "kind": "table",
+      "columns": ["Need", "Use", "Key facts"],
+      "rows": [
+        ["Multi-source, permission-aware grounding shared by many agents; complex or conversational questions", "Foundry IQ knowledge base (agentic retrieval)", "Knowledge sources are indexed (Blob, OneLake, search index) or remote (SharePoint, web). Parallel subqueries, semantic rerank built in, citations. Agents connect through the MCP tool `knowledge_base_retrieve`. Hub-based projects are not supported. Exam era: knowledge bases became GA in April 2026 (`2026-04-01`) for extractive retrieval; LLM query planning, answer synthesis and reasoning effort (`minimal`, `low`, `medium`) were preview (`2025-11-01-preview`). Docs today: those are GA in `2026-10-01`; remote SharePoint is still preview."],
+        ["Ground on one existing search index", "Azure AI Search tool (`AzureAISearchTool`)", "Query types `simple`, `semantic`, `vector`, `vector_simple_hybrid`, `vector_semantic_hybrid`; optional `filter` and `top_k`; exactly one index. A search service with public access disabled needs a managed identity (keyless) connection and standard setup with VNet injection. Docs today: default `query_type` is `vector_semantic_hybrid`, default `top_k` is 5."],
+        ["User-uploaded or small document sets, no search infrastructure", "File search tool + vector store", "Service parses, chunks (800 tokens, 400 overlap), embeds (`text-embedding-3-large`, 256 dimensions), then hybrid search and rerank. 512 MB per file, 10,000 files per store, one vector store per agent and one per conversation. Standard setup keeps files in your Storage and vectors in your Azure AI Search service."],
+        ["Existing orchestration, lowest latency, full control of the query", "Classic RAG: hybrid query (`search` + `vectorQueries`, merged with RRF) and optional semantic ranker (`queryType: semantic`)", "Single query, millisecond latency, no LLM in retrieval. Set vector `k` to 50 when using the semantic ranker. Security trimming through filters or permission metadata."],
+        ["Remember user preferences and history across sessions", "Memory (preview in both eras): memory store + memory search tool", "Types: user profile, chat summary (docs today add procedural). Needs Azure OpenAI chat and embedding deployments. Scope memories per user (docs today: `scope` = `{{$userId}}`). No VNet support."],
+        ["Context inside one conversation", "Conversation state (conversations and responses)", "Short-term only; nothing is distilled across sessions."],
+        ["Agent service must call a REST API that has an OpenAPI spec", "OpenAPI tool (anonymous, API key or managed identity auth)", "Runs service-side. Function calling instead returns the call to your app, which executes it."],
+        ["Same curated tools for many agents and frameworks", "Docs today: Foundry toolbox (first appeared in preview around April 2026)", "One MCP-compatible endpoint with central auth and versioning. Exam era: attach tools to each agent directly (MCP tool with `allowed_tools` and `require_approval`, OpenAPI, function calling)."],
+        ["Vectors next to frequently changing operational data", "Database vector search (Azure Cosmos DB for NoSQL, Azure Database for PostgreSQL, Azure SQL Database, Azure Managed Redis)", "Use Azure AI Search when you need a separate managed index over many sources with integrated vectorization."]
+      ],
+      "note": "Naming. Exam era (Apr 2026): Azure AI Search is the service; Foundry IQ is the knowledge base / agentic retrieval layer. Docs today (since November 2026): the service itself is called Foundry IQ (Azure AI Search); the resource type `Microsoft.Search/searchServices`, endpoints, SDKs and role names such as Search Index Data Reader are unchanged. When searching Learn during the exam, expect the new name in titles.",
+      "ref": {"title": "Retrieval-augmented generation (RAG) in Foundry IQ (Azure AI Search)", "url": "https://learn.microsoft.com/en-us/azure/search/retrieval-augmented-generation-overview"}
+    },
+    {
+      "title": "Agent kinds (exam era vs docs today)",
+      "kind": "table",
+      "columns": ["Kind", "You provide", "Pick when / status"],
+      "rows": [
+        ["Prompt agent", "Instructions, model and tools through the portal, SDK or REST; no code, no compute", "Both eras. Fastest path; production agents without custom orchestration"],
+        ["Workflow (preview)", "Visual or YAML orchestration of agents: sequential, group chat, human in the loop", "Exam era: the declarative choice for multi-agent orchestration with branching and approvals. Docs today: retiring December 1, 2026 - use Agent Framework workflows deployed as hosted agents, Azure Logic Apps, or A2A"],
+        ["Hosted agent", "Your code (Agent Framework, LangGraph, custom) as a container image", "Custom orchestration, own framework, control of CPU and memory. Preview in the exam era. Docs today add .zip deployment, per-session sandboxes and more protocols"],
+        ["Ephemeral agent (Responses API)", "Definition lives in your app code; nothing is persisted in Foundry", "You already run agent code elsewhere but want Foundry models and tools"],
+        ["Voice-based prompt agent", "Agent definition plus audio settings; Voice Live over WebSocket", "Docs today only (preview September 2026, GA November 2026)"],
+        ["Hosted protocol: Responses", "OpenAI-compatible `/responses`", "Chat, multi-turn, RAG; the platform manages history"],
+        ["Hosted protocol: Invocations", "Arbitrary JSON on `/invocations`", "Added April 2026: webhooks, non-conversational processing, custom streaming"],
+        ["Multi-agent options", "A2A tool or endpoint, Agent Framework orchestration, workflows", "The classic connected agents tool is not available in the new Agent Service"]
+      ],
+      "note": "Publishing. Exam era: publishing an agent creates an Agent Application resource with a stable endpoint and its own Entra agent identity, so RBAC for tools must be reassigned to the new identity; callers need the Azure AI User role on the application and API keys are not supported; the application can then be published to Microsoft 365 Copilot and Teams. Docs today: Agent Applications are the legacy flow; newly created agents already have a stable endpoint and unique identity, and publish means distributing to Microsoft 365 Copilot and Teams.",
+      "ref": {"title": "Agents in Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/overview"}
+    },
+    {
+      "title": "Agent environment: basic vs standard setup",
+      "kind": "table",
+      "columns": ["Aspect", "Basic setup", "Standard setup"],
+      "rows": [
+        ["Where agent state lives", "Microsoft-managed multitenant storage, logically separated", "Your Azure Cosmos DB for NoSQL (conversations, agent metadata), Azure Storage (files), Azure AI Search (vector stores)"],
+        ["Customer-managed keys", "No", "Yes"],
+        ["BYO virtual network for agent egress", "Docs today: yes, with platform-managed data resources (exam-era status not verified; the long-standing pattern is the network-secured standard setup)", "Yes, with your own data resources (network-secured standard setup)"],
+        ["Private search service for the Azure AI Search tool", "Not supported", "Supported with VNet injection and a managed identity connection"],
+        ["How you wire it", "Nothing to configure", "Exam era: capability hosts (account first, then project; REST only; no update - delete and recreate; one per scope or 409). Docs today: capability settings on the account and project (API `2026-07-15-preview`); the capability host article is retained for reference"],
+        ["Cosmos DB sizing (docs today)", "Not applicable", "At least 3000 RU/s; 1000 RU/s per container and 3 to 5 containers per project. Too little throughput fails provisioning"],
+        ["Roles", "Exam era names: Azure AI Account Owner creates the account and project; Azure AI User creates and edits agents. Docs today: Foundry Account Owner, Foundry User, and Foundry Agent Consumer for invoke-only", "Also Role Based Access Control Administrator (or Owner) to assign roles on the BYO resources; the project managed identity needs data-plane roles on Cosmos DB, Storage and the search service"]
+      ],
+      "note": "RBAC rename (about July 2026): Azure AI User, Azure AI Project Manager, Azure AI Account Owner and Azure AI Owner became Foundry User, Foundry Project Manager, Foundry Account Owner and Foundry Owner; role IDs and permissions are unchanged, so expect the Azure AI names on the exam. A project is the unit of sharing and isolation. There is no direct upgrade path for agents from hub-based projects or Azure OpenAI Assistants (re-create them in a Foundry project), but existing model deployments and quota can be reused. Foundry has no automatic cross-region failover.",
+      "ref": {"title": "Set up your environment (Foundry Agent Service)", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/environment-setup"}
+    },
+    {
+      "title": "Network isolation for agents",
+      "kind": "bullets",
+      "bullets": [
+        "Decide egress first, then inbound. Default is public inbound, public outbound, Microsoft-managed storage.",
+        "Public egress + a private endpoint (or an IP allowlist) on the Foundry resource secures the inbound path only.",
+        "BYO virtual network (both eras, the network-secured standard agent setup): dedicated subnet delegated to `Microsoft.App/environments`, not shared with another Foundry resource, Foundry resource in the same region as the virtual network. Docs today: at least /27, /24 or larger for production.",
+        "Virtual network injection is chosen when the Foundry account is created and cannot be added to an existing account.",
+        "Private endpoints for BYO Storage, Cosmos DB and the search service are NOT created automatically; add them and their private DNS zones yourself.",
+        "On-premises reach: BYO virtual network plus VPN or ExpressRoute.",
+        "Managed virtual network (newer option; its exam-era status is not verified): Microsoft runs the network; cue is 'cannot manage IP ranges' or 'overlapping address space'. Modes: Allow internet outbound, Allow only approved outbound. Cannot be disabled once enabled; not creatable in the Azure portal UI.",
+        "Key-based search connections cannot reach a search service with public access disabled - use the project managed identity. Memory stores have no VNet support.",
+        "IaC samples (foundry-samples `infrastructure-setup-bicep`, with a Terraform mirror): `41-standard-agent-setup`, `10-private-network-basic`, `15-private-network-standard-agent-setup`, `18-managed-virtual-network`."
+      ],
+      "note": "Trap pair: 'we control IP ranges, peering, firewall, on-premises' -> BYO virtual network with a delegated subnet; 'only restrict who can call the endpoint' -> private endpoint on the Foundry resource.",
+      "ref": {"title": "Networking options for Foundry Agent Service", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/networking-options"}
+    },
+    {
+      "title": "Create a Foundry resource and a model deployment with the CLI",
+      "kind": "code",
+      "lang": "bash",
+      "code": "# Foundry resource = Microsoft.CognitiveServices/accounts, kind AIServices\naz cognitiveservices account create -n $accountName -g $rg \\\n  --custom-domain $accountName --location $location \\\n  --kind AIServices --sku S0\n\n# Models and SKUs available to this resource\naz cognitiveservices account list-models -n $accountName -g $rg\n\n# Deployments live on the resource; its projects reuse them\naz cognitiveservices account deployment create -n $accountName -g $rg \\\n  --deployment-name Phi-4-mini-instruct \\\n  --model-name Phi-4-mini-instruct --model-version 1 \\\n  --model-format Microsoft \\\n  --sku-name GlobalStandard --sku-capacity 1",
+      "note": "`--model-format` is the provider (`OpenAI` for Azure OpenAI models, `Microsoft` for Phi). `--sku-name` is the deployment type code. Bicep equivalents: `Microsoft.CognitiveServices/accounts` (kind `AIServices`), `accounts/projects`, and `accounts/deployments` with `sku.name`, `sku.capacity`, `properties.model` (`format`, `name`, `version`) and `raiPolicyName`. At inference time pass the deployment name in `model`.",
+      "ref": {"title": "Deploy models using Azure CLI and Bicep", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/create-model-deployments"}
+    },
+    {
+      "title": "CI/CD: agent evaluation gate with OpenID Connect",
+      "kind": "code",
+      "lang": "yaml",
+      "code": "permissions: { id-token: write, contents: read }\njobs:\n  run-action:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: azure/login@v2\n        with:\n          client-id: ${{ vars.AZURE_CLIENT_ID }}\n          tenant-id: ${{ vars.AZURE_TENANT_ID }}\n          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}\n      - uses: microsoft/ai-agent-evals@v3-beta\n        with:\n          azure-ai-project-endpoint: ${{ vars.PROJECT_ENDPOINT }}\n          deployment-name: gpt-4.1-mini\n          agent-ids: \"my-agent:1,my-agent:2\"\n          data-path: ${{ github.workspace }}/evals/data.json",
+      "note": "Both eras: `id-token: write` enables OIDC federation, so no `AZURE_CLIENT_SECRET` is stored (federated credential issuer `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`). The `v3-beta` action (released December 2025, preview) targets the new agents: `agent-ids` takes `name:version` values, comma-separated and compared statistically; `deployment-name` is the judge model; `data-path` is a JSON file with `name`, `evaluators`, `data`. Azure DevOps equivalent: task `AIAgentEvaluation@2` behind an Azure Resource Manager service connection. Least privilege: Azure AI User (today: Foundry User) at the project scope. Hosted agent loop with azd in both eras: `azd ai agent init` -> `azd ai agent run` (local) -> `azd up` -> `azd ai agent invoke`. Docs today only: azd evaluation gate `azd ai eval run show RUN_ID --eval EVAL_NAME --wait --fail-on pass-rate=0.8` (extension `azure.ai.evaluations`); `azd ai agent eval` appeared in May 2026 and was replaced by `azd ai eval` in October 2026.",
+      "ref": {"title": "How to run an evaluation in GitHub Action (preview)", "url": "https://learn.microsoft.com/en-us/azure/foundry/how-to/evaluation-github-action"}
+    }
+  ],
+  "triggers": [
+    {"when": "Prompts must be processed only inside the EU (or US) data zone, billed pay-per-token", "pick": "Data Zone Standard (`DataZoneStandard`)", "why": "Routing stays inside the Microsoft-defined zone and the default quota is higher than geography-based Standard."},
+    {"when": "Data residency AND reserved, predictable throughput with low latency variance", "pick": "Data Zone Provisioned (single geography only: Regional Provisioned)", "why": "PTUs reserve capacity; the data-zone flavor stays in zone with higher availability than one region."},
+    {"when": "Millions of requests, results within 24 hours are fine, lowest cost, must not touch online quota", "pick": "Global Batch, or Data Zone Batch when residency applies", "why": "50% cheaper with a separate enqueued token quota; input is a JSONL file."},
+    {"when": "One endpoint that sends easy prompts to cheap models and hard prompts to frontier models", "pick": "Deploy `model-router` (Data Zone Standard when residency applies)", "why": "Per-prompt routing without model-selection code. `model` = `auto` is a November 2026 preview, not exam era."},
+    {"when": "Several agents share knowledge from Blob, SharePoint and the web, with citations and per-user permissions", "pick": "Foundry IQ knowledge base (agentic retrieval) through the MCP tool `knowledge_base_retrieve`", "why": "Multi-source retrieval with parallel subqueries and semantic rerank behind one shared endpoint."},
+    {"when": "Agent must ground on one existing Azure AI Search index", "pick": "Azure AI Search tool with a hybrid + semantic query type", "why": "The tool targets exactly one index; the docs today call the service Foundry IQ (Azure AI Search)."},
+    {"when": "Users upload documents and expect answers from them; no search service to manage", "pick": "File search tool with a vector store", "why": "The service parses, chunks, embeds and runs hybrid search for files up to 512 MB."},
+    {"when": "Remember each user's preferences across sessions and devices", "pick": "Memory store + memory search tool (preview), scoped per user", "why": "Managed long-term memory: extraction, consolidation and retrieval per user."},
+    {"when": "Bring your own LangGraph or Agent Framework code, or control the container's CPU and memory", "pick": "Hosted agent", "why": "Prompt agents are configuration only, with no code or compute to manage."},
+    {"when": "Declarative multi-agent orchestration with branching and human approval, no code", "pick": "Exam era: Foundry workflow (preview). Docs today: Agent Framework workflow deployed as a hosted agent", "why": "Workflows retire December 1, 2026, but the April 2026 outline still names them."},
+    {"when": "All conversation history, files and vector stores must live in our subscription, or CMK is required", "pick": "Standard agent setup with BYO Cosmos DB, Storage and Azure AI Search", "why": "Basic setup keeps agent state in Microsoft-managed multitenant storage."},
+    {"when": "No public egress, with full control of IP ranges, peering, firewall and on-premises reach", "pick": "BYO virtual network: subnet delegated to `Microsoft.App/environments`, set when the account is created", "why": "Agents are injected into a subnet you own; add VPN or ExpressRoute for on-premises."},
+    {"when": "Varying or unstructured documents, inferred fields, no labeled data, or audio and video", "pick": "Content Understanding analyzer", "why": "Zero-shot schema with confidence and grounding; fixed-template forms or air-gapped sites go to Document Intelligence."},
+    {"when": "Pipeline must authenticate to Foundry with no stored secrets and least privilege", "pick": "OIDC federated credential + `id-token: write`, Azure AI User (today: Foundry User) at project scope", "why": "Workload identity federation replaces the client secret; never Contributor on the subscription."},
+    {"when": "Stay on a validated model version, but never break when it is retired", "pick": "Upgrade policy 'Once the current version expires'", "why": "Opt out stops working at retirement; 'new default' upgrades earlier than you want."},
+    {"when": "Agent service must call an Entra-protected REST API that has an OpenAPI spec, with no keys and no client-side code", "pick": "OpenAPI tool with managed identity authentication", "why": "Function calling hands the call back to your app; an API key connection stores a secret."}
+  ],
+  "lookup": [
+    {"topic": "Deployment types and SKU codes", "search": "deployment types Microsoft Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types"},
+    {"topic": "Serverless API vs managed compute", "search": "deployment overview Foundry Models serverless managed compute", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/deployments-overview"},
+    {"topic": "Model router (routing modes, limits; what changed and when)", "search": "what's new model router Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/whats-new-model-router"},
+    {"topic": "Model version upgrade policies and retirement", "search": "model versions Foundry Models upgrade policy", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/model-versions"},
+    {"topic": "Agent types (prompt, hosted; workflows retiring)", "search": "agents in Microsoft Foundry overview agent types", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/overview"},
+    {"topic": "Basic vs standard agent setup", "search": "Foundry Agent Service set up your environment basic standard setup", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/environment-setup"},
+    {"topic": "Agent networking (BYO vs managed virtual network)", "search": "networking options Foundry Agent Service", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/networking-options"},
+    {"topic": "Agentic retrieval vs classic RAG (Azure AI Search, now titled Foundry IQ)", "search": "RAG Foundry IQ Azure AI Search agentic retrieval classic RAG", "url": "https://learn.microsoft.com/en-us/azure/search/retrieval-augmented-generation-overview"},
+    {"topic": "Agent memory (preview)", "search": "memory in Foundry Agent Service", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/what-is-memory"},
+    {"topic": "Content Understanding vs Document Intelligence vs LLM", "search": "choose the right Foundry Tool for document processing", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/choosing-right-ai-tool"}
+  ],
+  "flashcards": [
+    {"front": "SKU codes for the three provisioned deployment types?", "back": "`GlobalProvisionedManaged`, `DataZoneProvisionedManaged`, and `ProvisionedManaged` (Regional Provisioned)."},
+    {"front": "In which order do new models reach deployment types?", "back": "Global Standard -> Global Provisioned -> Data Zone Standard/Provisioned -> regional Standard/Provisioned (last, not guaranteed)."},
+    {"front": "Global Batch in one line?", "back": "50% less than Global Standard, 24-hour target turnaround, separate enqueued token quota, JSONL input where each line has a `custom_id`."},
+    {"front": "Developer deployment type?", "back": "Fine-tuned model evaluation only; fixed 24-hour lifetime then auto-deleted; no SLA and no data residency guarantee."},
+    {"front": "Exam-era RBAC role names vs the names in the docs today?", "back": "Azure AI User, Azure AI Project Manager, Azure AI Account Owner, Azure AI Owner -> renamed Foundry User, Foundry Project Manager, Foundry Account Owner, Foundry Owner (about July 2026). Same role IDs and permissions."},
+    {"front": "Deployment set to 'Opt out of automatic model version upgrades' - what happens at retirement?", "back": "It stops accepting requests and returns errors until you move it to a supported version (docs today: retired models return `410 Gone`)."},
+    {"front": "Model router: default routing mode and supported deployment types?", "back": "Balanced; Global Standard or Data Zone Standard. (Docs today, Nov 2026: `model` = `auto` preview is always Global Standard - not exam era.)"},
+    {"front": "Model router rejects some very long prompts. Why, and what is the fix?", "back": "Effective context window is the smallest in the pool; route to a model subset of large-context models."},
+    {"front": "Standard agent setup: which BYO resource stores what?", "back": "Azure Cosmos DB for NoSQL = conversations and agent metadata; Azure Storage = files; Azure AI Search = vector stores."},
+    {"front": "Subnet requirements for BYO virtual network agent injection?", "back": "Dedicated subnet delegated to `Microsoft.App/environments`, same region as the Foundry resource, not shared with another Foundry resource (docs today: at least /27)."},
+    {"front": "Capability hosts: scopes and change model?", "back": "Exam era: account-level first, then project-level; one per scope (409 otherwise); no updates - delete and recreate; REST only. Docs today: capability settings replace them."},
+    {"front": "File search defaults?", "back": "800-token chunks with 400 overlap, `text-embedding-3-large` at 256 dimensions, up to 20 chunks in context; 512 MB per file; 10,000 files per vector store."},
+    {"front": "Azure AI Search tool: how many indexes, and which query types?", "back": "One index per tool. `simple`, `semantic`, `vector`, `vector_simple_hybrid`, `vector_semantic_hybrid` (docs today: the last one is the default, `top_k` 5)."},
+    {"front": "Memory (preview): what it is and its network limit?", "back": "Managed long-term memory (user profile and chat summary memories) in a memory store, used through the memory search tool and scoped per user; no VNet integration."},
+    {"front": "ARM type and kind of a Foundry resource and project?", "back": "`Microsoft.CognitiveServices/accounts` with kind `AIServices`; the project is `Microsoft.CognitiveServices/accounts/projects`."},
+    {"front": "Which MCP tool does a Foundry IQ knowledge base expose to Agent Service?", "back": "`knowledge_base_retrieve` at `{search-endpoint}/knowledgebases/{name}/mcp`."},
+    {"front": "GitHub OIDC federated credential values and workflow permission?", "back": "Issuer `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`; the job needs `id-token: write`."},
+    {"front": "Foundry workflows: exam era vs today?", "back": "Exam era: preview feature for declarative agent orchestration (sequential, group chat, human in the loop). Docs today: retiring December 1, 2026; use Agent Framework workflows as hosted agents."}
+  ],
+  "questions": [
+    {
+      "id": "d1a-01",
+      "objective": "1.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A health insurer receives referral letters and physician notes as scanned PDFs. Layouts differ by clinic and most of the content is free-form text. You must extract fields such as diagnosis and referring provider, plus a coverage end date that has to be inferred from a start date and a stated duration. No labeled training data exists, reviewers need a confidence score and source grounding for each field, and engineering effort must be minimal. What should you use?",
+      "options": [
+        "A Document Intelligence custom model trained on labeled sample documents",
+        "A Document Intelligence prebuilt model designed for structured forms",
+        "A Content Understanding custom analyzer with a plain-language field schema",
+        "A multimodal chat model deployment prompted with a JSON Schema output format"
+      ],
+      "answer": [2],
+      "explanation": "Content Understanding custom analyzers are LLM-powered and zero-shot: you describe the fields in plain language, no labeling is needed, they handle unstructured and varied layouts, can infer fields that are not literally on the page, and return confidence and grounding. Document Intelligence custom models need labeled samples and fit highly structured templates, and its prebuilt models target standard forms such as invoices or IDs. Building your own with a chat model gives no built-in confidence or grounding and leaves OCR preprocessing, chunking and scaling to you.",
+      "ref": {"title": "Choose the right Foundry Tool for document processing", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/choosing-right-ai-tool"},
+      "tags": ["content-understanding", "document-intelligence", "service-selection"]
+    },
+    {
+      "id": "d1a-02",
+      "objective": "1.1",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "An EU bank runs a customer-support app on Microsoft Foundry. Most prompts are simple FAQs, but some require deep reasoning. You must reduce model cost without writing any model-selection logic, and all prompts must be processed inside the EU data zone. What should you do?",
+      "options": [
+        "Deploy a small model and a large model, and choose between them in app code",
+        "Deploy `model-router` as Global Standard and optimize its routing for cost",
+        "Deploy only a small language model as a Data Zone Standard deployment",
+        "Deploy `model-router` as Data Zone Standard and call it by its name"
+      ],
+      "answer": [3],
+      "explanation": "Model router is a deployable model that picks the underlying model for each prompt, so simple prompts go to cheaper models and hard prompts go to more capable ones without selection logic in your code. Since its GA version (`2025-11-18`) it can be deployed as Global Standard or Data Zone Standard, and only the Data Zone Standard deployment keeps processing inside the data zone. Choosing between two deployments in application code is exactly the logic you must avoid, a Global Standard router can process prompts in any geography, and a single small model cannot handle the prompts that need deep reasoning. Docs today (November 2026) also describe Auto (`model` set to `auto`, preview), which always processes as Global Standard and would not meet the requirement either.",
+      "ref": {"title": "What is model router?", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-router"},
+      "tags": ["model-router", "data-zone", "model-selection"]
+    },
+    {
+      "id": "d1a-03",
+      "objective": "1.1",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "Several agents in a Foundry project must answer complex, multi-part questions grounded in policy PDFs in Azure Blob Storage, a SharePoint site, and public web data. SharePoint content must not be copied into an index, and each user's SharePoint permissions must be enforced at query time. Questions should be decomposed into subqueries that run in parallel, answers need citations, and all agents must share one retrieval layer. What should you use?",
+      "options": [
+        "The file search tool with a vector store attached to each agent",
+        "A Foundry IQ knowledge base with indexed and remote knowledge sources",
+        "The Azure AI Search tool configured for `vector_semantic_hybrid` queries",
+        "A memory store that all agents access through the memory search tool"
+      ],
+      "answer": [1],
+      "explanation": "A Foundry IQ knowledge base uses agentic retrieval: the query is planned and decomposed, subqueries run in parallel across the knowledge sources, results are semantically reranked, and citations are returned. Knowledge sources can be indexed (Blob Storage, OneLake) or remote (SharePoint queried live with the user's identity, web), and many agents can share one knowledge base through its MCP endpoint. The Azure AI Search tool is single-shot and can target only one index, file search works on uploaded files with one vector store per agent, and memory holds user-specific context rather than curated organizational content. Era note: knowledge bases went GA in April 2026 while LLM query planning and remote SharePoint were preview; the docs today call the search service Foundry IQ (Azure AI Search).",
+      "ref": {"title": "What is Foundry IQ?", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/what-is-foundry-iq"},
+      "tags": ["foundry-iq", "agentic-retrieval", "rag", "knowledge-base"]
+    },
+    {
+      "id": "d1a-04",
+      "objective": "1.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A travel-booking prompt agent starts a new conversation for every session. Users complain that they must restate their seat preference, loyalty program, and dietary needs each time and on every device. The agent must automatically extract these facts from conversations, consolidate conflicting updates, and recall them for the same user in later sessions. What should you add to the agent?",
+      "options": [
+        "A memory store with the memory search tool scoped to each user",
+        "A Foundry IQ knowledge base that indexes the travel policy documents",
+        "The file search tool with a vector store created for each conversation",
+        "A model with a larger context window to hold more conversation history"
+      ],
+      "answer": [0],
+      "explanation": "Memory in Foundry Agent Service (preview) is managed long-term memory: it extracts facts such as preferences from conversations, consolidates them and resolves conflicts, and retrieves them in later sessions. Scoping the memory search tool per user keeps each user's memories separate (docs today: set `scope` to `{{$userId}}`). A knowledge base grounds the agent in curated organizational content, file search covers documents that users provide during an interaction, and a larger context window still only holds the current conversation.",
+      "ref": {"title": "Memory in Microsoft Foundry Agent Service (preview)", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/what-is-memory"},
+      "tags": ["agent-memory", "preview", "knowledge-vs-memory"]
+    },
+    {
+      "id": "d1a-05",
+      "objective": "1.1",
+      "type": "single",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "A retailer needs to label each incoming support ticket with one of five categories and generate a one-sentence reason for the label. Volume is very high, responses must be fast, and the cost per request must be as low as possible. The task doesn't need deep multi-step reasoning. Which type of model from the Foundry Models catalog should you deploy?",
+      "options": [
+        "An embedding model such as `text-embedding-3-small`",
+        "A reasoning model found with the reasoning capability filter",
+        "A small language model such as `Phi-4-mini-instruct`",
+        "A large language model on a Global Provisioned deployment"
+      ],
+      "answer": [2],
+      "explanation": "Small language models such as the Phi-4 family are efficient and cost-effective for common natural language tasks where speed and cost matter more than the most complex reasoning. Reasoning models and large models add latency and cost that this task doesn't need, and provisioned capacity does not turn a large model into the cheapest choice. An embedding model returns vectors for similarity search and cannot generate the category and reason text.",
+      "ref": {"title": "Explore the model catalog (Learn training unit)", "url": "https://learn.microsoft.com/en-us/training/modules/model-catalog-evaluate/2-explore-model-catalog"},
+      "tags": ["model-selection", "slm", "phi"]
+    },
+    {
+      "id": "d1a-06",
+      "objective": "1.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A prompt agent in Foundry Agent Service must look up order status from an internal REST API that runs in Azure App Service and is protected by Microsoft Entra ID. The API already has an OpenAPI 3.0 specification. The agent service itself must call the API, so your client application must not execute the call or relay its result, and no API keys may be stored anywhere. Which tool configuration should you use?",
+      "options": [
+        "A function calling tool with the function implemented in the client app",
+        "An OpenAPI tool that authenticates to the API with managed identity",
+        "An OpenAPI tool that uses an API key stored in a project connection",
+        "An MCP tool whose server URL points to the base URL of the REST API"
+      ],
+      "answer": [1],
+      "explanation": "The OpenAPI tool lets the agent service call an HTTP API that is described by an OpenAPI specification, and it supports anonymous, API key and managed identity authentication; managed identity (the project's identity with a role on the target API) keeps the solution keyless. Function calling only returns the function name and arguments, and your application must execute the call and send back the output. An API key connection stores a secret, and an MCP tool needs a remote MCP server, which a plain REST API is not. Docs today also offer a Foundry toolbox for sharing tools across agents; it appeared after the exam outline was written.",
+      "ref": {"title": "Connect agents to OpenAPI tools", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/openapi"},
+      "tags": ["openapi-tool", "managed-identity", "function-calling", "tool-integration"]
+    },
+    {
+      "id": "d1a-07",
+      "objective": "1.1",
+      "type": "multi",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "Contoso is standardizing on Foundry Agent Service. The platform team prefers prompt agents because they need no code or compute, and it approves a hosted agent only when a requirement cannot be met otherwise. Which two requirements call for a hosted agent instead of a prompt agent? Each correct answer presents a complete solution.",
+      "options": [
+        "The orchestration logic is custom Python code built with LangGraph.",
+        "The agent must use the file search and code interpreter tools.",
+        "The team must choose the CPU and memory allocated to the agent's container.",
+        "The agent must authenticate to tools with a Microsoft Entra agent identity.",
+        "The agent must scale automatically with request volume."
+      ],
+      "answer": [0, 2],
+      "explanation": "Hosted agents exist for bring-your-own code or frameworks (Agent Framework, LangGraph, custom code) packaged as a container, and they let you specify the CPU and memory for the agent's runtime. Prompt agents are defined only by instructions, a model and tools: they already get Foundry models and platform tools, a Microsoft Entra agent identity, a managed endpoint and automatic scaling with no compute for you to manage, so those requirements do not force a hosted agent. Since April 2026 hosted agents can also accept arbitrary payloads such as webhooks through the Invocations protocol.",
+      "ref": {"title": "What are hosted agents?", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/hosted-agents"},
+      "tags": ["agent-types", "hosted-agent", "prompt-agent"]
+    },
+    {
+      "id": "d1a-08",
+      "objective": "1.1",
+      "type": "yesno",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You are deciding between classic RAG and agentic retrieval in Azure AI Search for a new chat application that grounds its answers in a product documentation index. The team is weighing latency, relevance, and model dependencies. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "Agentic retrieval adds latency compared with a single-query classic RAG pipeline.", "answer": true},
+        {"text": "Semantic ranking is built into agentic retrieval, whereas in classic RAG it is optional.", "answer": true},
+        {"text": "A knowledge base that uses the `minimal` retrieval reasoning effort requires a chat model deployment to plan subqueries.", "answer": false}
+      ],
+      "explanation": "Agentic retrieval can plan and run several subqueries, so it adds latency compared with a single query, but it handles complex or conversational questions better. Semantic ranking is built into agentic retrieval and optional in classic RAG, where you request it with `queryType` set to `semantic`. LLM query planning happens only at `low` and `medium` effort; `minimal` bypasses model-based planning, so no chat model is needed to plan. Era note: in April 2026 the stable API (`2026-04-01`) covered extractive retrieval and LLM planning was still preview; it became GA in `2026-10-01`, and the docs now call the service Foundry IQ (Azure AI Search).",
+      "ref": {"title": "Agentic retrieval in Foundry IQ (Azure AI Search)", "url": "https://learn.microsoft.com/en-us/azure/search/agentic-retrieval-overview"},
+      "tags": ["rag", "agentic-retrieval", "semantic-ranking", "hybrid-search"]
+    },
+    {
+      "id": "d1a-09",
+      "objective": "1.1",
+      "type": "dropdown",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You are connecting a Foundry IQ knowledge base named `hr-policy-kb` to a prompt agent by using the Python SDK. A `RemoteTool` project connection that uses the project managed identity already exists. The agent must be able to call only the knowledge base retrieval tool, and retrieval calls must run without pausing for approval. Complete the code.",
+      "code": "mcp_endpoint = (f\"{search_endpoint}/knowledgebases/hr-policy-kb/mcp\"\n                f\"?api-version={api_version}\")\nkb_tool = MCPTool(\n    server_label=\"knowledge-base\",\n    server_url=mcp_endpoint,\n    require_approval=\"[[1]]\",\n    allowed_tools=[\"[[2]]\"],\n    [[3]]=project_connection_name,\n)\nagent = project_client.agents.create_version(\n    agent_name=\"hr-assistant\",\n    definition=PromptAgentDefinition(\n        model=\"gpt-4.1-mini\",\n        instructions=instructions,\n        tools=[kb_tool],\n    ),\n)",
+      "blanks": [
+        {"options": ["always", "never", "auto"], "answer": 1},
+        {"options": ["knowledge_base_retrieve", "azure_ai_search", "file_search", "memory_search"], "answer": 0},
+        {"options": ["connection_string", "project_connection_id", "index_name", "api_key"], "answer": 1}
+      ],
+      "explanation": "An agent reaches a knowledge base through the MCP tool: `require_approval` set to `never` lets retrieval run without an approval pause, and `allowed_tools` restricts the agent to `knowledge_base_retrieve`, the knowledge base tool supported with Foundry Agent Service. `project_connection_id` points to the `RemoteTool` connection so the project managed identity authenticates to the knowledge base MCP endpoint; no key, connection string or index name is passed because the knowledge base orchestrates its own knowledge sources.",
+      "ref": {"title": "Connect a Foundry IQ (Azure AI Search) knowledge base to Foundry Agent Service", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/foundry-iq-connect"},
+      "tags": ["foundry-iq", "mcp", "allowed_tools", "require_approval", "python-sdk"]
+    },
+    {
+      "id": "d1a-10",
+      "objective": "1.1",
+      "type": "order",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "You need to ground a prompt agent in a product manual (PDF) by using the file search tool. The project uses the basic agent setup, and you don't want to deploy or manage any search infrastructure. The manual must be fully searchable before the agent is created. Not all actions are used. Which actions should you perform in sequence?",
+      "items": [
+        "Upload the PDF and add it to a new vector store.",
+        "Wait until the vector store reports that file processing is completed.",
+        "Create an agent version with a file search tool that references the vector store.",
+        "Ask the agent a question that only the manual can answer and check the grounded response."
+      ],
+      "distractors": [
+        "Deploy an embedding model and generate an embedding for each page.",
+        "Create an indexer and a skillset in Azure AI Search."
+      ],
+      "explanation": "File search is fully managed: you upload the file into a vector store, wait for ingestion to finish so all content is searchable, attach the file search tool to the agent, and then query. The service parses, chunks, embeds and runs hybrid search for you, so you neither deploy an embedding model nor build an indexer and skillset; those belong to a custom search index pipeline.",
+      "ref": {"title": "File search tool for agents", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/file-search"},
+      "tags": ["file-search", "vector-store", "retrieval"]
+    },
+    {
+      "id": "d1a-11",
+      "objective": "1.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A customer-facing copilot sends a steady, high volume of requests to a GPT model in Microsoft Foundry. Users need consistently low latency. Compliance requires that prompts and responses are processed only within the EU data zone, and the architecture board wants better capacity availability than a deployment that is tied to a single Azure region. Which deployment type should you choose?",
+      "options": [
+        "Global Provisioned",
+        "Data Zone Standard",
+        "Regional Provisioned",
+        "Data Zone Provisioned"
+      ],
+      "answer": [3],
+      "explanation": "Data Zone Provisioned reserves PTUs, which gives predictable throughput and lower latency variance, while routing dynamically only within the Microsoft-defined EU data zone, so availability is higher than with a regional deployment. Global Provisioned can process requests in any Azure region. Data Zone Standard is pay-per-token and can show latency variability at high, consistent volume. Regional Provisioned keeps processing in the geography but depends on the capacity of one region.",
+      "ref": {"title": "Deployment types for Microsoft Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types"},
+      "tags": ["deployment-types", "ptu", "data-residency"]
+    },
+    {
+      "id": "d1a-12",
+      "objective": "1.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "Every night, a US insurer must summarize about two million claim notes. Results are needed by the next evening. Processing must stay within the United States, cost must be minimized, and the job must not consume the token quota that the daytime chat application relies on. Which deployment type should you use?",
+      "options": [
+        "Data Zone Batch",
+        "Global Batch",
+        "Data Zone Standard",
+        "Developer"
+      ],
+      "answer": [0],
+      "explanation": "Data Zone Batch offers the same functionality as Global Batch (50% lower cost, 24-hour target turnaround, separate enqueued token quota that leaves online workloads undisturbed) but routes traffic only to datacenters in the US data zone. Global Batch can process the data in any Azure region. Data Zone Standard is billed at the full pay-per-token rate for real-time use, and Developer deployments are only for evaluating fine-tuned models.",
+      "ref": {"title": "Deployment types for Microsoft Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types"},
+      "tags": ["deployment-types", "batch", "cost"]
+    },
+    {
+      "id": "d1a-13",
+      "objective": "1.2",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You are designing a new Foundry environment for agents that use the standard agent setup. Agent outbound traffic must not use the public internet. The agents must reach an on-premises inventory API over the company's existing ExpressRoute connection, and the network team insists on controlling the IP address ranges, peering, firewall, and routing for the agent network. What should you configure?",
+      "options": [
+        "A managed virtual network in the Allow only approved outbound mode",
+        "A bring-your-own virtual network with a dedicated, delegated subnet",
+        "Public egress with a private endpoint on the Foundry resource",
+        "Public egress with the Foundry endpoint limited to selected IP addresses"
+      ],
+      "answer": [1],
+      "explanation": "With a bring-your-own virtual network, agent compute is injected into a dedicated subnet that you delegate to `Microsoft.App/environments`, so egress stays on your private network, you keep control of IP ranges, peering, firewall and routing, and agents can reach on-premises systems through your VPN or ExpressRoute. A managed virtual network also isolates egress, but Microsoft operates it, so the network team cannot control addressing or routing. A private endpoint or an IP allowlist on the Foundry resource only restricts who can call the endpoint; agent egress stays public.",
+      "ref": {"title": "Networking options for Foundry Agent Service", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/networking-options"},
+      "tags": ["networking", "byo-virtual-network", "agent-infrastructure"]
+    },
+    {
+      "id": "d1a-14",
+      "objective": "1.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "You deploy a GPT model as a Global Standard deployment. Your team validated its prompts against the current model version and wants to stay on that version for as long as possible. However, the deployment must keep serving requests after that version is retired, without anyone having to intervene. Which version upgrade policy should you configure?",
+      "options": [
+        "Opt out of automatic model version upgrades",
+        "Upgrade once new default version becomes available",
+        "Once the current version expires",
+        "Opt out of automatic upgrades and add a Service Health alert"
+      ],
+      "answer": [2],
+      "explanation": "With Once the current version expires, the deployment keeps its current version until that version is retired and then updates automatically. Upgrade once new default version becomes available switches earlier, as soon as a new default is designated. With Opt out, the deployment stops accepting requests and returns errors after retirement unless someone upgrades it manually; an alert only notifies and still requires intervention.",
+      "ref": {"title": "Model versions in Microsoft Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/model-versions"},
+      "tags": ["model-versions", "upgrade-policy", "retirement"]
+    },
+    {
+      "id": "d1a-15",
+      "objective": "1.2",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "A Foundry project uses the standard agent setup with virtual network injection. An agent uses the Azure AI Search tool. The search service has public network access disabled and a private endpoint in the same virtual network, and that must not change. Agent runs fail because the tool cannot connect to the search service. The project connection to the search service uses an API key. What should you do?",
+      "options": [
+        "Switch the project connection to keyless project managed identity authentication",
+        "Regenerate the search admin key and update the project connection with the new key",
+        "Change the tool's `query_type` from `vector_semantic_hybrid` to `simple` in the agent",
+        "Redeploy the agent in a basic agent setup that uses Microsoft-managed search resources"
+      ],
+      "answer": [0],
+      "explanation": "When the search service has public network access disabled, the tool's project connection must use managed identity (keyless) authentication; API key-based connections cannot reach the service over the private network. After switching, make sure the project managed identity has the Search Index Data Contributor and Search Service Contributor roles. A new key changes nothing, the query type is unrelated to connectivity, and a basic agent setup doesn't support private search resources at all. The docs today name the service Foundry IQ (Azure AI Search).",
+      "ref": {"title": "Connect a Foundry IQ (Azure AI Search) index to Foundry agents", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/ai-search"},
+      "tags": ["keyless", "managed-identity", "private-networking", "azure-ai-search"]
+    },
+    {
+      "id": "d1a-16",
+      "objective": "1.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "Your team has a hub-based project in Foundry (classic). Its agents were built with an older SDK and a project connection string, and the hub uses an Azure OpenAI resource for model deployments. You must adopt the current Foundry Agent Service with the Responses API, the current `azure-ai-projects` SDK, and Foundry IQ knowledge bases, and you must keep using the existing model deployments. What should you do?",
+      "options": [
+        "Keep the hub-based project and upgrade only the `azure-ai-projects` package",
+        "Create another hub-based project and connect the Azure OpenAI resource to it",
+        "Convert the hub to a Foundry resource in place and keep the connection string",
+        "Create a Foundry resource and project, connect Azure OpenAI, re-create agents"
+      ],
+      "answer": [3],
+      "explanation": "New agent capabilities are available only in Foundry projects, which are child resources of a Foundry resource; knowledge base connections don't support hub-based projects, and current SDKs use the project endpoint instead of a connection string. There is no direct upgrade path for existing agents and their conversation state, so you re-create the agents in code, but you can connect the existing Azure OpenAI resource and keep using its deployments and quota. Staying on a hub (old or new) keeps you on the classic experience and older SDK versions, and a hub cannot be converted in place.",
+      "ref": {"title": "Migrate from hub-based to Foundry projects (classic)", "url": "https://learn.microsoft.com/en-us/azure/foundry-classic/how-to/migrate-project"},
+      "tags": ["foundry-project", "hub-based", "migration", "architecture"]
+    },
+    {
+      "id": "d1a-17",
+      "objective": "1.2",
+      "type": "multi",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "You are planning a standard agent setup in Foundry Agent Service so that all agent data stays in your Azure tenant. Which three Azure resources must you provide to store conversation history, uploaded files, and vector stores? Each correct answer presents part of the solution.",
+      "options": [
+        "Azure Cosmos DB for NoSQL",
+        "Azure SQL Database",
+        "Azure Storage",
+        "Azure Managed Redis",
+        "Azure AI Search",
+        "Azure Container Registry"
+      ],
+      "answer": [0, 2, 4],
+      "explanation": "Standard setup is bring-your-own resources: Azure Cosmos DB for NoSQL stores messages, conversation history and agent metadata, Azure Storage stores files uploaded by developers and users, and Azure AI Search (named Foundry IQ (Azure AI Search) in the docs today) stores the vector stores that agents create. Azure SQL Database and Azure Managed Redis are not used for agent state, and Azure Container Registry only holds hosted agent images.",
+      "ref": {"title": "Set up standard agent resources", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/standard-agent-setup"},
+      "tags": ["standard-agent-setup", "byo-resources", "agent-infrastructure"]
+    },
+    {
+      "id": "d1a-18",
+      "objective": "1.2",
+      "type": "multi",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A GitHub Actions workflow must run agent evaluations against a Foundry project as a pull request quality gate. Security policy forbids storing client secrets or API keys in GitHub and requires least privilege. Which two actions should you perform? Each correct answer presents part of the solution.",
+      "options": [
+        "Add a federated identity credential for the GitHub OIDC issuer to a Microsoft Entra application or user-assigned managed identity, and grant the job `id-token: write`.",
+        "Store `AZURE_CLIENT_SECRET` as an encrypted environment secret in a protected GitHub environment.",
+        "Assign the workflow identity the Azure AI User role at the Foundry project scope.",
+        "Assign the workflow identity the Contributor role at the subscription scope.",
+        "Store the Foundry project API key as a repository secret and pass it to the evaluation step."
+      ],
+      "answer": [0, 2],
+      "explanation": "Workload identity federation lets the job exchange its GitHub OIDC token (issuer `https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`) for a Microsoft Entra token, which requires the `id-token: write` permission and removes the need for a client secret. Azure AI User at the project scope is the least-privilege role for running the evaluation; the docs today call the same role Foundry User (renamed about July 2026, same role ID and permissions). A stored client secret or API key violates the policy even when encrypted, and Contributor on the subscription is far broader than needed.",
+      "ref": {"title": "How to run an evaluation in GitHub Action (preview)", "url": "https://learn.microsoft.com/en-us/azure/foundry/how-to/evaluation-github-action"},
+      "tags": ["ci-cd", "oidc", "keyless", "least-privilege", "github-actions"]
+    },
+    {
+      "id": "d1a-19",
+      "objective": "1.2",
+      "type": "yesno",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "You are reviewing deployment types for Foundry Models sold by Azure before you set a deployment standard for a new project. The project includes nightly bulk jobs, tests of fine-tuned models, and a plan to adopt new models as soon as they are released. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "Global Batch requests use a separate enqueued token quota, so they don't disrupt online workloads.", "answer": true},
+        {"text": "A Developer deployment is intended only for evaluating fine-tuned models and is deleted automatically after 24 hours.", "answer": true},
+        {"text": "Geography-based deployment types (Standard and Regional Provisioned) are the first to offer newly released models.", "answer": false}
+      ],
+      "explanation": "Batch has its own enqueued token quota and a 24-hour target turnaround at 50% lower cost. The Developer type is for fine-tuned model evaluation only, has a fixed 24-hour lifetime with automatic deletion, and has no SLA or data residency guarantee. New models become available in a set order: Global first, then Data Zone, and geography-based types last with no guaranteed date.",
+      "ref": {"title": "Deployment types for Microsoft Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types"},
+      "tags": ["deployment-types", "batch", "developer-tier"]
+    },
+    {
+      "id": "d1a-20",
+      "objective": "1.2",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "You are scripting a Foundry environment with the Azure CLI. The first command creates the Foundry resource. The second command deploys `gpt-4.1` with pay-per-token billing. Inference must be processed only within the data zone of the resource's region, and the deployment should get a higher default quota than a geography-based deployment. Assume that the model supports every deployment type in the region. Complete the commands.",
+      "code": "az cognitiveservices account create -n $accountName -g $rg \\\n  --custom-domain $accountName --location $location \\\n  --kind [[1]] --sku S0\n\naz cognitiveservices account deployment create -n $accountName -g $rg \\\n  --deployment-name chat \\\n  --model-name gpt-4.1 --model-version 2025-04-14 \\\n  --model-format [[2]] \\\n  --sku-capacity 50 \\\n  --sku-name [[3]]",
+      "blanks": [
+        {"options": ["OpenAI", "AIServices", "CognitiveServices", "Hub"], "answer": 1},
+        {"options": ["Microsoft", "AzureOpenAI", "OpenAI", "AIServices"], "answer": 2},
+        {"options": ["GlobalStandard", "Standard", "DataZoneStandard", "DataZoneProvisionedManaged"], "answer": 2}
+      ],
+      "explanation": "A Foundry resource is a `Microsoft.CognitiveServices/accounts` resource of kind `AIServices`. `--model-format` names the provider: `OpenAI` for Azure OpenAI models such as `gpt-4.1` (`Microsoft` is used for Phi models). `DataZoneStandard` is the pay-per-token type that keeps processing inside the data zone with a higher default quota than geography-based types. `GlobalStandard` can process in any region, `Standard` is the geography-based type, and `DataZoneProvisionedManaged` is billed per PTU rather than per token.",
+      "ref": {"title": "Deploy models using Azure CLI and Bicep", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/create-model-deployments"},
+      "tags": ["azure-cli", "iac", "deployment-types", "foundry-resource"]
+    },
+    {
+      "id": "d1a-21",
+      "objective": "1.2",
+      "type": "dropdown",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You are adding the AI Agent Evaluation GitHub Action (preview) to a workflow so that versions 1 and 2 of an agent are compared on every push to `main`. The workflow must sign in to Azure by using OpenID Connect with no stored client secret. Complete the workflow.",
+      "code": "permissions: { id-token: [[1]], contents: read }\njobs:\n  evaluate:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: azure/login@v2\n        with:\n          client-id: ${{ vars.AZURE_CLIENT_ID }}\n          tenant-id: ${{ vars.AZURE_TENANT_ID }}\n          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}\n      - uses: [[2]]\n        with:\n          azure-ai-project-endpoint: ${{ vars.PROJECT_ENDPOINT }}\n          deployment-name: gpt-4.1-mini\n          [[3]]: \"support-agent:1,support-agent:2\"\n          data-path: ${{ github.workspace }}/evals/dataset.json",
+      "blanks": [
+        {"options": ["read", "write", "none"], "answer": 1},
+        {"options": ["azure/cli@v2", "AIAgentEvaluation@2", "microsoft/ai-agent-evals@v3-beta", "azure/login@v2"], "answer": 2},
+        {"options": ["agent-id", "agent-ids", "baseline-agent-id", "agents"], "answer": 1}
+      ],
+      "explanation": "The job needs `id-token: write` so that `azure/login` can request a GitHub OIDC token and exchange it through the federated credential; `read` or `none` blocks the token request. The GitHub Action is `microsoft/ai-agent-evals` (the `v3-beta` release from December 2025 supports the new Foundry agents); `AIAgentEvaluation@2` is the equivalent Azure DevOps pipeline task, not a GitHub Action. `agent-ids` takes one or more `name:version` values separated by commas and compares them with statistical tests, while `baseline-agent-id` only names the single baseline. `deployment-name` is the judge model deployment.",
+      "ref": {"title": "How to run an evaluation in GitHub Action (preview)", "url": "https://learn.microsoft.com/en-us/azure/foundry/how-to/evaluation-github-action"},
+      "tags": ["ci-cd", "github-actions", "oidc", "agent-evaluation", "preview"]
+    },
+    {
+      "id": "d1a-22",
+      "objective": "1.2",
+      "type": "order",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "You are building a hosted agent by using the Azure Developer CLI (`azd`) with the `azd ai agent` extension. You must test the agent locally before it is deployed, and then verify the deployed agent. Not all actions are used. Which actions should you perform in sequence?",
+      "items": [
+        "Run `azd ai agent init` to scaffold the agent project.",
+        "Run `azd ai agent run` to start the agent locally, and send it a test request.",
+        "Run `azd up` to provision the infrastructure and deploy the agent.",
+        "Run `azd ai agent invoke` to send a test request to the deployed agent."
+      ],
+      "distractors": [
+        "Run `azd down` to remove the provisioned Azure resources.",
+        "Run `az ml online-deployment create` to host the container on a managed online endpoint."
+      ],
+      "explanation": "The azd loop is: scaffold with `azd ai agent init`, run the agent locally with `azd ai agent run` and test it, provision and deploy with `azd up`, and then call the deployed agent with `azd ai agent invoke`. `azd down` tears the environment down, and an Azure Machine Learning online deployment is unrelated to Foundry hosted agents. Era note: the run and invoke commands were added in March 2026; evaluation commands arrived later (`azd ai agent eval` in May 2026, replaced by `azd ai eval` in October 2026), so they are not part of an exam-era flow.",
+      "ref": {"title": "Agent development with the Azure Developer CLI", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/cli-agent-development"},
+      "tags": ["azd", "hosted-agent", "ci-cd", "deployment-lifecycle"]
+    }
+  ]
+}

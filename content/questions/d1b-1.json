@@ -1,0 +1,482 @@
+{
+  "part": "d1b",
+  "domain": 1,
+  "cheatsheet": [
+    {
+      "title": "Standard deployment quota, rate limits and 429s",
+      "kind": "table",
+      "columns": ["Item", "What the docs say"],
+      "rows": [
+        ["Quota scope", "Per subscription, per region, per model, per deployment type, in TPM. You assign TPM to each deployment until the regional quota is used up."],
+        ["RPM limit", "Derived from TPM by a model-specific ratio (older chat models: 6 RPM per 1,000 TPM). RPM and TPM can't be set independently."],
+        ["RPM evaluation window", "Checked over 1-second or 10-second windows. 600 RPM is about 10 requests per second, so a burst gets 429 even when the minute total is under the limit."],
+        ["Token accounting", "Docs today: Standard deployments count actual input plus generated tokens; a high max output-token setting doesn't reserve TPM. Exam era: could not be verified on Learn; AI-102-era guidance estimated from the prompt plus `max_tokens`, so 'lower `max_tokens`' may still be offered as a 429 mitigation."],
+        ["429: rate limit exceeded", "Message says 'Rate limit is exceeded'. Raise the deployment's TPM, rebalance TPM between deployments, or request more quota."],
+        ["429: temporary rate limit adjustment", "Docs today (not dated): `x-ratelimit-limit-tokens` is lower than the configured TPM. Shared-pool protection on Standard; retry with backoff; not a quota problem."],
+        ["429: system capacity", "Message says the service is temporarily unable to process the request. Transient; back off; consider PTU if it persists."],
+        ["Response headers", "`x-ratelimit-limit-requests`, `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-requests`, `x-ratelimit-remaining-tokens`, `x-ratelimit-reset-requests`, `x-ratelimit-reset-tokens`; `retry-after-ms` on 429."],
+        ["SDK retries", "The OpenAI Python SDK retries 429 with exponential backoff; default `max_retries` is 2. Set `max_retries=0` when you wrap calls in your own retry library."],
+        ["Who can see quota", "Cognitive Services Usages Reader at subscription scope. Resource or resource group scope doesn't work."],
+        ["Programmatic checks", "Usages API: consumed vs limit per region. Model Capacities API: where a model can be deployed and how much capacity is available."],
+        ["Deleting a resource by API", "Quota of its deployments stays locked for 48 hours unless you purge the deleted resource. The portal makes you delete deployments first."]
+      ],
+      "note": "Azure Monitor token metrics show billed tokens from successful requests; throttling is enforced separately, so 429s can appear while metrics look far below quota.",
+      "ref": {"title": "Manage Azure OpenAI in Microsoft Foundry Models quota", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/quota"}
+    },
+    {
+      "title": "Throughput and cost levers: need -> use",
+      "kind": "table",
+      "columns": ["Need", "Use", "Key detail"],
+      "rows": [
+        ["Guaranteed throughput and consistent latency", "Provisioned throughput (PTU)", "PTU quota is model-independent, per subscription, region and deployment type. Quota isn't capacity. Billed per PTU-hour; a 1-month or 1-year reservation is a discount, not a capacity guarantee (deploy first, then reserve)."],
+        ["Know when PTU is saturated", "Provisioned-managed utilization V2 metric", "At 100% the service returns 429 with `retry-after-ms` and `retry-after`. The per-request estimate is prompt tokens (minus cached) plus `max_tokens`, so set `max_tokens` close to real output size."],
+        ["Absorb PTU bursts", "Spillover to a Standard deployment (GA since August 2025)", "Same resource, same model and version. `spilloverDeploymentName` deployment property (all requests) or `x-ms-spillover-deployment` request header (selected requests). Triggers on 429, 500, 503 and 400 for long context. Look for `x-ms-spillover-from-deployment`; split metrics by `IsSpillover`."],
+        ["Large async jobs with no latency need", "Global Batch or Data Zone Batch", "24-hour target turnaround, 50% less than Global Standard, separate enqueued-token quota."],
+        ["Repeated long prompt prefixes", "Prompt caching", "Applies to prompts of 1,024+ tokens with an identical prefix; put static content first. Hits show as `cached_tokens` in `prompt_tokens_details`."],
+        ["Per-app token caps on shared deployments", "API Management AI gateway: `llm-token-limit`", "`counter-key` plus `tokens-per-minute` returns 429; `token-quota` plus `token-quota-period` returns 403; `estimate-prompt-tokens` is required."],
+        ["Per-consumer token reporting", "API Management: `llm-emit-token-metric`", "Emits token metrics with custom dimensions (subscription, API, user) to Application Insights."],
+        ["Fewer model calls for similar prompts", "API Management: `llm-semantic-cache-lookup` and `llm-semantic-cache-store`", "Uses an embeddings API and Azure Managed Redis (or another RediSearch-compatible cache)."],
+        ["Prefer PTU, fail over to pay-as-you-go", "API Management backend pool with priorities and circuit breaker", "Load balancer supports round-robin, weighted, priority and session-aware; the circuit breaker honors the backend `Retry-After` header."],
+        ["Spend alerts", "Azure Cost Management budgets", "Alert only, never block. Seeing cost needs Cost Management Reader; no Foundry role shows cost."]
+      ],
+      "note": "Calls sent straight to the model endpoint bypass every API Management policy. Exam era: the Foundry portal's AI gateway (preview) could set per-project token limits. Docs today: those settings are read-only in Foundry and are edited as API Management policy; Foundry cost controls that block requests are a newer preview.",
+      "ref": {"title": "What is provisioned throughput for Foundry Models?", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/provisioned-throughput"}
+    },
+    {
+      "title": "Monitoring and audit map: signal -> where it lives",
+      "kind": "table",
+      "columns": ["Signal", "Where", "Gotcha"],
+      "rows": [
+        ["Requests, availability, token counts, provisioned utilization", "Azure Monitor platform metrics on the Foundry resource", "Collected automatically. Viewing needs Monitoring Reader. Prefer the Models metric category (all models) over the Azure OpenAI category."],
+        ["Per-request status and latency, audit events", "Resource logs: RequestResponse, Trace, Audit", "Nothing is stored until you create a diagnostic setting (needs Monitoring Contributor). Query the `AzureDiagnostics` table."],
+        ["Agent runs, tool calls, tokens, latency per span", "Tracing (OpenTelemetry) in Application Insights", "Server-side tracing starts when Application Insights is connected to the project; no code change. Readers need Log Analytics Reader."],
+        ["Token usage, latency, run success rate, evaluation scores, red teaming results", "Agent Monitoring Dashboard (Monitor tab of the agent)", "Reads the connected Application Insights resource; empty without it."],
+        ["Quality and safety of live responses", "Continuous evaluation", "Scores production responses at a capped hourly rate. Docs today: an evaluation rule fired on response completion with `max_hourly_runs` (default 100). Earlier preview API: `create_agent_evaluation` with a sampling configuration. The project managed identity needs Azure AI User (today Foundry User)."],
+        ["Drift against a fixed test set", "Scheduled evaluation", "Timer-triggered; scores a fixed set of queries or recent traces."],
+        ["Blocked requests and abusive users", "Risks & Safety monitoring (preview)", "Potentially abusive user detection needs the `user` field in requests and an Azure Data Explorer database."],
+        ["Azure AI Search query health", "`SearchLatency`, `SearchQueriesPerSecond`, `ThrottledSearchQueriesPercentage`", "Throttled queries return 503. Add replicas for query load; add partitions for storage and indexing."],
+        ["Azure AI Search ingestion health", "Indexer status and execution history (last 50 runs); `DocumentsProcessedCount`, `SkillExecutionCount`", "Top-level `status: running` only means the indexer is available. A run can be `success` with failed items when below max failed items. Use a debug session for skillset errors."],
+        ["Azure AI Search operations log", "Resource log category `OperationLogs`", "Needs a diagnostic setting; lands in `AzureDiagnostics`."],
+        ["Retrieval relevance", "Document Retrieval evaluator (NDCG, XDCG, Fidelity, Holes) or Retrieval evaluator", "Document Retrieval needs ground-truth relevance labels; Retrieval is LLM-judged and doesn't."],
+        ["Which agent identity got a token for which resource", "Microsoft Entra sign-in and audit logs", "Filter by agent type; Foundry traces show the tool calls themselves."],
+        ["Proof that an image is AI-generated", "Content Credentials (C2PA manifest)", "Attached automatically to Azure OpenAI generated images, cryptographically signed; verify at contentcredentials.org/verify."]
+      ],
+      "note": "Client-side tracing is optional: `AIProjectInstrumentor().instrument()` plus `configure_azure_monitor(connection_string=project.telemetry.get_application_insights_connection_string())`. In client-side traces, message content and tool arguments are recorded only when `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` is `true` (default false). Docs today call Azure AI Search 'Foundry IQ (Azure AI Search)' (renamed November 2026).",
+      "ref": {"title": "Monitor model deployments in Microsoft Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/monitor-models"}
+    },
+    {
+      "title": "RBAC: role -> what it is for (exam-era names first)",
+      "kind": "table",
+      "columns": ["Role", "Use it for", "Limit or trap"],
+      "rows": [
+        ["Azure AI User (today: Foundry User)", "Build and test agents, run evaluations, data actions in a project. Also the role the project managed identity needs. Assigned on an Agent Application resource, it lets a caller invoke only that published agent.", "No model deployments, no role assignments, can't publish agents."],
+        ["Azure AI Project Manager (today: Foundry Project Manager)", "Build in projects, publish agents (minimum role, at Foundry resource scope), assign the user role to others.", "Can assign only the user role. Docs disagree on model deployment; the permissions table says no."],
+        ["Azure AI Account Owner (today: Foundry Account Owner)", "Create accounts and projects, deploy models, create and assign guardrails, manage connections.", "No data actions: can't build in a project or call agents."],
+        ["Azure AI Owner (today: Foundry Owner)", "Control plane plus data plane in one role.", "Highly privileged; the only built-in role that covers both planes."],
+        ["Foundry Agent Consumer (docs today only)", "Only call agent endpoints; assignable at project or single-agent scope with Azure CLI.", "Newer than the exam outline and doesn't work for Agent Applications. Exam-era equivalent: Azure AI User on the Agent Application resource."],
+        ["Owner / Contributor (Azure)", "Create resources and deploy models; Owner assigns roles.", "No data actions: neither grants Entra ID inference or agent access."],
+        ["Cognitive Services User", "Entra ID inference on the model endpoint (all models), per the keyless how-to.", "Cognitive Services OpenAI User covers only Azure OpenAI models."],
+        ["Cognitive Services Usages Reader", "View quota and usage.", "Must be assigned at subscription scope."],
+        ["Search Index Data Reader", "Query Azure AI Search indexes; can be scoped to one index with CLI, PowerShell or REST.", "Can't load documents or change definitions."],
+        ["Search Index Data Contributor", "Load documents and query.", "Can't create or alter indexes, indexers or skillsets."],
+        ["Search Service Contributor", "Create indexes, indexers and skillsets; can read admin keys.", "Can't query or load documents through RBAC."],
+        ["Storage Blob Data Reader", "Lets the Foundry resource's managed identity read a storage account you bring.", "Assigned on the storage account, not on the Foundry resource."],
+        ["Key Vault Crypto User", "Managed identity access to a customer-managed key.", "Grant it before enabling CMK or the operation fails."],
+        ["Log Analytics Reader", "Query traces and dashboard telemetry in Application Insights.", "Protected tables also need Privileged Monitoring Data Reader."]
+      ],
+      "note": "Exam era (April 2026): Azure AI User, Azure AI Owner, Azure AI Account Owner, Azure AI Project Manager. Docs today: renamed to Foundry User, Foundry Owner, Foundry Account Owner, Foundry Project Manager in May 2026; role IDs and permissions unchanged (user role is 53ca6127-db72-4b80-b1b0-d745d6d5456d). Azure AI Developer is for hubs and Azure Machine Learning, not Foundry projects. API keys bypass RBAC entirely.",
+      "ref": {"title": "Role-based access control for Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/rbac-foundry"}
+    },
+    {
+      "title": "Keyless auth and network isolation",
+      "kind": "bullets",
+      "bullets": [
+        "Token scopes: the docs use two, so recognize both. Today's keyless how-to requests `https://ai.azure.com/.default` for Foundry endpoints including `/openai/v1/`; many Azure OpenAI samples, including exam-era ones, request `https://cognitiveservices.azure.com/.default`. Azure AI Search uses `https://search.azure.com/.default`; ARM uses `https://management.azure.com/.default`.",
+        "Token auth needs a custom subdomain on the Foundry resource; a regional endpoint fails.",
+        "Foundry Agent Service and evaluations accept Microsoft Entra ID only. API keys can't invoke a published agent (true for exam-era Agent Applications and for today's agent endpoints).",
+        "Role assignments can take up to 5 minutes to propagate; security group membership changes apply immediately. A 401 with a token usually means wrong scope or expired token; 403 means a missing role assignment.",
+        "Disable keys with `disableLocalAuth: true` (Bicep or ARM), `Set-AzCognitiveServicesAccount -DisableLocalAuth $true`, or the Azure Policy 'Azure AI Services resources should have key access disabled'. Enforcement can lag; confirm that the old key returns 401.",
+        "In production prefer a deterministic credential such as `ManagedIdentityCredential` (pass `client_id` for a user-assigned identity) over `DefaultAzureCredential`.",
+        "Inbound isolation: public network access Disabled plus a private endpoint (sub-resource `account`), or selected networks and IPs. Private DNS zones: `privatelink.cognitiveservices.azure.com`, `privatelink.openai.azure.com`, `privatelink.services.ai.azure.com`.",
+        "Outbound isolation for agents: virtual network injection into a subnet delegated to `Microsoft.App/environments`, /27 or larger, dedicated to one Foundry resource, in the same region. It can't be added to an existing resource; redeploy.",
+        "Network-secured Standard agent setup requires your own Azure Storage, Azure AI Search and Azure Cosmos DB. Their private endpoints aren't created for you.",
+        "Azure AI Search tool with a private search service: the connection must use the project managed identity; key-based connections fail. Roles: Search Index Data Contributor and Search Service Contributor, and the search service must allow role-based access (Both or RBAC only).",
+        "Tool traffic when isolated (docs today): MCP, OpenAPI, Azure Functions and A2A go through your subnet; Code Interpreter and function calling stay on the Microsoft backbone; Bing grounding, web search and SharePoint grounding use public endpoints.",
+        "Indexers that must reach private data sources need `executionEnvironment` set to `Private`; the multitenant default can't cross private endpoints and silently produces an empty index.",
+        "Customer-managed keys: Key Vault or Managed HSM in the same region, soft delete and purge protection on, managed identity with Key Vault Crypto User granted before enabling. A project can't go back to Microsoft-managed keys. Omit `keyVersion` for automatic rotation."
+      ],
+      "note": "Azure Owner or Contributor can deploy a model but can't call it with Entra ID. Data-plane access always needs an explicit data role.",
+      "ref": {"title": "Authentication and authorization in Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/authentication-authorization-foundry"}
+    },
+    {
+      "title": "Keyless Responses API client (Python)",
+      "kind": "code",
+      "lang": "python",
+      "code": "from openai import OpenAI\nfrom azure.identity import DefaultAzureCredential, get_bearer_token_provider\n\ntoken_provider = get_bearer_token_provider(\n    DefaultAzureCredential(),\n    \"https://ai.azure.com/.default\",\n)\n\nclient = OpenAI(\n    base_url=\"https://<resource>.openai.azure.com/openai/v1/\",\n    api_key=token_provider,  # a callable, not a key\n)\n\nresponse = client.responses.create(\n    model=\"<deployment-name>\",\n    input=\"What is Azure AI?\",\n)\nprint(response.output_text)",
+      "note": "The token provider goes into `api_key` of the plain `OpenAI` client; `model` is the deployment name; the sample passes no `api_version`. The older `AzureOpenAI` client takes `azure_ad_token_provider` instead. Scope: this is today's keyless how-to; other samples, including exam-era ones, use `https://cognitiveservices.azure.com/.default` in the same position. For a user-assigned identity use `ManagedIdentityCredential(client_id=...)`.",
+      "ref": {"title": "Configure keyless authentication with Microsoft Entra ID", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/configure-entra-id"}
+    },
+    {
+      "title": "Content filters and guardrails: thresholds, defaults, intervention points",
+      "kind": "table",
+      "columns": ["Topic", "Fact"],
+      "rows": [
+        ["Structure", "A guardrail (exam-era and classic name: content filter configuration) is a named set of controls; a control = risk + intervention point(s) + action. In ARM it's a RAI policy, assigned to a deployment through `raiPolicyName`."],
+        ["Severity levels", "Safe, Low, Medium, High for Hate, Sexual, Violence and Self-harm. Safe is annotated but never filtered."],
+        ["Severity threshold (exam era: training module and classic docs)", "The threshold is the lowest severity that is filtered. Low = filters low, medium and high (strictest). Medium (default) = medium and high. High = only high (most permissive)."],
+        ["Blocking level (guardrails overview today)", "Labels for Low and High are inverted: Low = blocks high only (least restrictive); Medium = medium and high; High = blocks low, medium and high (most restrictive). Medium means the same in both wordings."],
+        ["How to answer", "Check whether the item says 'threshold' or 'blocking level', and prefer options that spell out which severities are filtered. Default in both: medium and high are filtered, low and safe pass."],
+        ["Off or annotate-only", "Anyone can turn harm filters off for prompts. Off or annotate-only for completions needs approval for modified content filtering (today: modified guardrails; Limited Access review)."],
+        ["Default guardrail", "Microsoft.DefaultV2: four harm categories at Medium on prompts and completions, user prompt attack (jailbreak) detection on prompts, protected material for text and code on completions. Indirect (document) attack detection is off. It can't be edited; create a custom one."],
+        ["Intervention points", "User input, tool call (preview, agents only), tool response (preview, agents only), output."],
+        ["Actions", "Models: Annotate, or Annotate and block. Agents (docs today): Annotate and block only."],
+        ["Agent vs model", "An agent's assigned guardrail fully overrides the guardrail of its model deployment. With none assigned, the agent inherits the deployment's guardrail."],
+        ["Skipped for agents", "Spotlighting and Groundedness controls don't take effect when the guardrail is applied to an agent."],
+        ["Tool-point scanning (docs today)", "Only for tools that support moderation: Azure AI Search, Azure Functions, OpenAPI, SharePoint grounding, Fabric data agent, Bing grounding, Bing custom search, Browser Automation."],
+        ["Per-request override", "Header `x-policy-id: <configuration name>` overrides the deployment's configuration for that call. Unknown name returns `InvalidContentFilterPolicy`. Not available for image input."],
+        ["Role needed", "Azure AI Account Owner (today Foundry Account Owner) or higher to create and assign guardrails."]
+      ],
+      "note": "Today's docs contradict each other on Low and High: the guardrails overview uses 'blocking level' (Low = least restrictive), while the classic content filter page, the Learn training module and the Content Understanding guardrails page use 'threshold' (Low = strictest). The setting never changes how content is classified, only which severities are filtered, and it doesn't affect Prompt Shields.",
+      "ref": {"title": "Guardrails and controls overview in Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/guardrails/guardrails-overview"}
+    },
+    {
+      "title": "Prompt Shields, protected material, groundedness, blocklists, streaming",
+      "kind": "bullets",
+      "bullets": [
+        "Prompt Shields = user prompt attacks (direct attacks, jailbreak; scanned at user input) plus indirect attacks (today also called document attacks; XPIA: instructions hidden in documents, emails or tool results). They don't judge harmfulness, accuracy or grounding.",
+        "Indirect attack detection in Chat Completions only sees text wrapped in the delimiter `\"\"\" <documents> ... </documents> \"\"\"` inside the user message; JSON-escape the document text.",
+        "Spotlighting (preview since May 2025): a toggle on the indirect attack control that base-64 encodes documents to mark them as low trust. More tokens, Chat Completions only, models only.",
+        "Standalone Content Safety API: `POST {endpoint}/contentsafety/text:shieldPrompt` with `userPrompt` and up to five `documents`; returns `attackDetected` for each. The API only detects; your code decides what to block.",
+        "Protected material for text covers lyrics, recipes, news and selected web content. Protected material for code matches public GitHub code and returns a citation URL and license in the annotation (index current only through April 6, 2023). English only; completions only.",
+        "Groundedness detection (preview): domain Medical or Generic, task Summarization or QnA, optional reasoning and correction; as a filter it works only with streaming and needs the documents delimiter. Exam era: a live preview feature. Docs today: retirement announced October 2026 for April 30, 2027, with evaluators as the suggested replacement.",
+        "PII filter (preview since October 2025) scans completions; Annotate or Annotate and block per PII category.",
+        "Task adherence (preview since November 2025) flags tool calls that don't match user intent; the Content Safety API returns `taskRiskDetected` and `details`.",
+        "Blocklists (`raiBlocklists`): exact or regex items, up to 10,000 terms per list, about 5 minutes to propagate, Azure OpenAI models only. Attach as `promptBlocklists` or `completionBlocklists` with `blocking: true`.",
+        "Filtered prompt: HTTP 400 with code `content_filter` (inner code `ResponsibleAIPolicyViolation`). Filtered completion: HTTP 200 with `finish_reason` of `content_filter`.",
+        "Annotations: Chat Completions returns `prompt_filter_results` and per-choice `content_filter_results` (harm categories: `severity` and `filtered`; others: `detected` and `filtered`; user prompt attacks appear under `jailbreak`). Docs today: the Responses API returns a top-level `content_filters` array with `blocked` and `source_type`.",
+        "Streaming: the default mode buffers and filters before returning chunks. Asynchronous Filter streams immediately and signals violations later (within about 1,000 characters), so the app must remove text it already showed.",
+        "Defender for Cloud AI threat protection (GA) raises security alerts for jailbreak, data leakage and credential theft by using Prompt Shields signals; text tokens only."
+      ],
+      "note": "A jailbreak that arrives inside a retrieved document is an indirect (document) attack, which is off by default. Making harm-category filtering stricter does nothing for it.",
+      "ref": {"title": "Prompt Shields in Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/content-filter-prompt-shields"}
+    },
+    {
+      "title": "Evaluators: need -> pick",
+      "kind": "table",
+      "columns": ["Need", "Evaluator", "Inputs and output"],
+      "rows": [
+        ["Response sticks to the retrieved context, judged by your own model", "Groundedness", "`response` and `context` (plus optional `query`); needs `deployment_name`; 1-5, pass at 3 or higher."],
+        ["Strict grounded yes/no from a Microsoft-hosted model", "Groundedness Pro (preview)", "`query`, `response`, `context`; backed by Azure AI Content Safety; true or false."],
+        ["Response answers the question, no ground truth available", "Relevance", "`query`, `response`; 1-5."],
+        ["Response misses nothing compared with the expected answer", "Response Completeness (preview)", "`ground_truth`, `response`; the recall side of grounding."],
+        ["Retrieved chunks are relevant, no labels available", "Retrieval", "`query`, `context`; LLM judge."],
+        ["Search ranking quality with relevance labels", "Document Retrieval", "`retrieval_ground_truth`, `retrieved_documents`; NDCG, XDCG, Fidelity, Max Relevance, Holes."],
+        ["Writing quality", "Coherence, Fluency", "1-5; LLM judge."],
+        ["Match to a reference answer", "Similarity (LLM, 1-5) or F1, BLEU, GLEU, ROUGE, METEOR (0-1, threshold 0.5)", "All need `ground_truth`; the algorithmic ones need no model."],
+        ["Harmful content in outputs", "Violence, Sexual, Self-harm, Hate and unfairness", "0-7 severity; pass when the score is 3 or lower; hosted service, no judge deployment."],
+        ["Other safety risks", "Protected material, Code vulnerability, Ungrounded attributes, Indirect attack (XPIA; models only)", "Pass or fail; aggregated as a defect rate."],
+        ["Agent reached the right outcome", "Intent Resolution, Task Adherence, Task Completion", "System evaluation of the final result."],
+        ["Agent used tools correctly", "Tool Call Accuracy, Tool Selection, Tool Input Accuracy, Tool Output Utilization, Tool Call Success", "Process evaluation of each step."],
+        ["Adversarial probing before release", "AI Red Teaming Agent", "PyRIT attack strategies; key metric is Attack Success Rate (ASR)."]
+      ],
+      "note": "Cloud evaluation config: type `azure_ai_evaluator`, `evaluator_name` such as `builtin.groundedness`, `initialization_parameters` with `deployment_name`, and a `data_mapping` (`{{item.x}}` for dataset columns, `{{sample.output_text}}` for generated output). Types `label_model`, `score_model`, `string_check` and `text_similarity` are Azure OpenAI graders, not built-in evaluators. The local `azure-ai-evaluation` package common in the exam era exposes the same evaluator names. Groundedness = precision; Response Completeness = recall.",
+      "ref": {"title": "Retrieval-Augmented Generation (RAG) evaluators", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/evaluation-evaluators/rag-evaluators"}
+    },
+    {
+      "title": "MCP tool-access controls and approval (JSON)",
+      "kind": "code",
+      "lang": "json",
+      "code": "{\n  \"type\": \"mcp\",\n  \"server_label\": \"tickets\",\n  \"server_url\": \"https://mcp.contoso.com/mcp\",\n  \"allowed_tools\": [\"search_tickets\", \"create_ticket\"],\n  \"require_approval\": {\"never\": [\"search_tickets\"]},\n  \"project_connection_id\": \"tickets-mcp-conn\"\n}\n\n{\n  \"type\": \"mcp_approval_response\",\n  \"approval_request_id\": \"<id of the mcp_approval_request item>\",\n  \"approve\": true\n}",
+      "note": "First object: the tool definition. `allowed_tools` omitted or `[]` means ALL tools; `require_approval` defaults to `always` (other values: `never`, `{\"never\": [...]}`, `{\"always\": [...]}`). Second object: the input item you send after an output item of type `mcp_approval_request`; older samples continue with `previous_response_id`, today's samples send it in the same `conversation`. Python class: `MCPTool(...)` from `azure.ai.projects.models`. Agent identity: exam era, unpublished agents shared the project's agent identity and got a dedicated one when published; docs today, every new agent has its own from creation. Either way it starts with no permissions.",
+      "ref": {"title": "Connect agents to Model Context Protocol servers", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/model-context-protocol"}
+    }
+  ],
+  "triggers": [
+    {"when": "429s although token usage is far below TPM, traffic arrives in bursts", "pick": "Smooth the request rate and retry with `retry-after-ms`", "why": "RPM is enforced over 1-second or 10-second windows, not the whole minute."},
+    {"when": "`x-ratelimit-limit-tokens` is lower than the deployment's configured TPM", "pick": "Back off and retry (or move to PTU); don't request more quota", "why": "Docs today call this a temporary rate limit adjustment on the shared Standard pool."},
+    {"when": "Provisioned deployment returns 429 at peak and overflow may go to pay-as-you-go", "pick": "Spillover: `spilloverDeploymentName` (all requests) or `x-ms-spillover-deployment` header (selected requests)", "why": "Routes non-200 PTU responses to a Standard deployment in the same resource."},
+    {"when": "Cap tokens per app, team or subscription key in front of shared deployments", "pick": "API Management AI gateway `llm-token-limit` with a `counter-key`", "why": "A deployment's TPM is one bucket shared by all callers."},
+    {"when": "Agent Monitor tab or Traces view is empty", "pick": "Connect Application Insights to the Foundry project", "why": "Dashboard and server-side traces read from the connected resource."},
+    {"when": "App or user only needs to invoke one published agent", "pick": "Exam era: Azure AI User on the Agent Application resource. Docs today: Foundry Agent Consumer at agent scope", "why": "Scope the invoke permission to the single agent, not to the project."},
+    {"when": "Developer must build agents with pre-deployed models, least privilege", "pick": "Azure AI User (today: Foundry User) on the project", "why": "Data-plane role without deployment or role-assignment rights."},
+    {"when": "Remove API keys, keyless, no secrets in config", "pick": "Managed identity + token credential + data-plane role, then `disableLocalAuth: true`", "why": "Keys are all-or-nothing and bypass RBAC. Scope is `https://ai.azure.com/.default` or, in older samples, `https://cognitiveservices.azure.com/.default`."},
+    {"when": "Azure AI Search tool fails against a search service with public access disabled", "pick": "Project connection with managed identity plus Search Index Data Contributor and Search Service Contributor", "why": "Key-based connections aren't supported with private virtual networking."},
+    {"when": "Agent must reach private resources with no public egress", "pick": "Standard agent setup with virtual network injection (subnet delegated to `Microsoft.App/environments`, /27 or larger)", "why": "Injection puts the agent runtime in your VNet so it reaches private endpoints; it must be chosen at creation."},
+    {"when": "Filter only the most severe harmful content", "pick": "Severity threshold High (exam-era wording). The guardrails overview today calls the same setting blocking level Low", "why": "Threshold = lowest severity filtered; the default Medium filters medium and high."},
+    {"when": "Malicious instructions hidden in a retrieved document, email or tool result", "pick": "Prompt Shields for indirect (document) attacks; for agents add the control at the tool response intervention point", "why": "Off by default and separate from jailbreak detection."},
+    {"when": "User tries to override the system prompt, role-play or DAN-style prompt", "pick": "Prompt Shields for user prompt attacks (jailbreak) at user input", "why": "On by default in Microsoft.DefaultV2."},
+    {"when": "Completions must be returned unfiltered or annotate-only for harm categories", "pick": "Apply for modified content filtering (today: modified guardrails), then set completion filters to off or annotate", "why": "Completion filtering can't be disabled without approval."},
+    {"when": "Detect hallucinated or unsupported claims in RAG answers", "pick": "Groundedness evaluator (own judge, 1-5) or Groundedness Pro (Content Safety backed, Boolean)", "why": "Both compare the response with the supplied context."},
+    {"when": "Agent may use only some tools of an MCP server and writes need human sign-off", "pick": "`allowed_tools` with a nonempty list plus `require_approval`; handle `mcp_approval_request`", "why": "An empty `allowed_tools` list allows everything; approval defaults to `always`."}
+  ],
+  "lookup": [
+    {"topic": "Quota, TPM/RPM, 429 types and headers", "search": "manage Azure OpenAI quota rate limits 429 retry-after-ms", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/quota"},
+    {"topic": "PTU spillover configuration and headers", "search": "spillover provisioned deployments x-ms-spillover-deployment", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/spillover-traffic-management"},
+    {"topic": "Built-in roles and permissions table (Azure AI User = Foundry User)", "search": "role-based access control Microsoft Foundry built-in roles", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/rbac-foundry"},
+    {"topic": "Keyless auth code, token scope, disabling keys", "search": "configure keyless authentication Microsoft Entra ID Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/configure-entra-id"},
+    {"topic": "Private endpoints, VNet injection, tool support when isolated", "search": "configure network isolation Microsoft Foundry private link agent tools", "url": "https://learn.microsoft.com/en-us/azure/foundry/how-to/configure-private-link"},
+    {"topic": "Guardrails: intervention points, agent vs model, blocking levels", "search": "guardrails and controls overview Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/guardrails/guardrails-overview"},
+    {"topic": "Content filter thresholds (exam-era wording), configurability table, x-policy-id", "search": "configure content filters classic severity threshold", "url": "https://learn.microsoft.com/en-us/azure/foundry-classic/openai/how-to/content-filters"},
+    {"topic": "Prompt Shields, indirect (document) attacks, spotlighting", "search": "Prompt Shields user prompt attack document attack indirect", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/content-filter-prompt-shields"},
+    {"topic": "Evaluator inputs, scales and thresholds", "search": "RAG evaluators groundedness relevance retrieval Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/evaluation-evaluators/rag-evaluators"},
+    {"topic": "MCP tool: allowed_tools, require_approval, approval items", "search": "connect agents to Model Context Protocol servers require_approval", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/model-context-protocol"}
+  ],
+  "flashcards": [
+    {"front": "Severity threshold Low, Medium, High: what is filtered (exam-era wording)?", "back": "The threshold is the lowest severity filtered. Low: low, medium and high (strictest). Medium (default): medium and high. High: high only. Today's guardrails overview uses 'blocking level' with Low and High swapped (Low = high only)."},
+    {"front": "What does Microsoft.DefaultV2 enable for text models?", "back": "Hate, Sexual, Violence, Self-harm at Medium on prompts and completions; user prompt attack (jailbreak) detection on prompts; protected material for text and code on completions. Indirect (document) attack detection is off."},
+    {"front": "The four guardrail intervention points", "back": "User input, tool call (preview), tool response (preview), output. Tool call and tool response apply to agents only."},
+    {"front": "An agent has its own guardrail and its model deployment has a different one. Which applies?", "back": "Only the agent's guardrail; it fully overrides the model's. With no agent guardrail assigned, the agent inherits the deployment's guardrail."},
+    {"front": "Which guardrail actions can agents use (docs today)?", "back": "Annotate and block only. Annotate without blocking is available for models only."},
+    {"front": "Who can turn harm filters off or use annotate-only for completions?", "back": "Only customers approved for modified content filtering (today: modified guardrails; Limited Access review). Turning off prompt filtering needs no approval."},
+    {"front": "Prompt Shields: the two attack types and where each is scanned", "back": "User prompt attack (direct, jailbreak): user input. Indirect attack (document attack): document content at user input for models, plus tool response for agents (preview)."},
+    {"front": "How do you mark document text for indirect attack detection in Chat Completions?", "back": "Wrap it in `\"\"\" <documents> ... </documents> \"\"\"` inside the user message and JSON-escape the text."},
+    {"front": "`allowed_tools: []` on an MCP tool means what?", "back": "All tools on the server are allowed (same as omitting it). Only a nonempty list restricts the agent."},
+    {"front": "Default and supported values of `require_approval` on an MCP tool", "back": "Default `always`. Also `never`, `{\"never\": [tools]}` and `{\"always\": [tools]}`."},
+    {"front": "How does an app approve an MCP tool call?", "back": "Find the output item of type `mcp_approval_request`, then send an `mcp_approval_response` input item with `approval_request_id` set to that item's ID and `approve: true`."},
+    {"front": "Token scope for Entra ID calls to Foundry and Azure OpenAI endpoints", "back": "Today's keyless how-to: `https://ai.azure.com/.default`. Many samples, including exam-era ones: `https://cognitiveservices.azure.com/.default`. Azure AI Search: `https://search.azure.com/.default`."},
+    {"front": "Least privilege for a caller that only invokes one published agent", "back": "Exam era: Azure AI User on the Agent Application resource that publishing creates. Docs today: Foundry Agent Consumer at the scope of the individual agent."},
+    {"front": "Role and scope needed to view model quota", "back": "Cognitive Services Usages Reader at subscription scope."},
+    {"front": "Subnet requirements for agent virtual network injection", "back": "Delegated to `Microsoft.App/environments`, /27 or larger, dedicated to one Foundry resource, same region as the resource. Can't be added after the resource is created."},
+    {"front": "Quality evaluator scoring vs content safety evaluator scoring", "back": "Quality (Groundedness, Relevance, Coherence): 1-5, pass at 3 or higher, needs a judge model. Content safety (Violence and others): 0-7 severity, pass at 3 or lower, hosted service with no judge deployment."},
+    {"front": "Groundedness vs Groundedness Pro vs Response Completeness", "back": "Groundedness: your judge model, 1-5, precision. Groundedness Pro (preview): Azure AI Content Safety model, true or false. Response Completeness (preview): recall against ground truth."},
+    {"front": "Two ways to enable PTU spillover", "back": "Deployment property `spilloverDeploymentName` (every request; wins if both are set) or request header `x-ms-spillover-deployment` (per request). Target is a Standard deployment of the same model and version in the same resource."}
+  ],
+  "questions": [
+    {
+      "id": "d1b-01",
+      "objective": "1.3",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A Standard deployment of a chat model has limits of 100,000 TPM and 600 RPM. A scheduled job sends 400 requests in the first 5 seconds of every minute and then idles. Each request has a prompt of about 100 tokens and limits the output to 100 tokens. Azure Monitor token metrics stay far below the TPM limit, yet many requests fail with HTTP 429. What is the most likely cause?",
+      "options": [
+        "Each request exceeds the maximum input token limit of the model, so the service rejects it",
+        "The subscription has used all of its regional quota for the model",
+        "RPM is enforced over 1-second or 10-second windows, so the burst is throttled",
+        "The deployment reached 100 percent provisioned utilization"
+      ],
+      "answer": [2],
+      "explanation": "RPM limits assume evenly spread requests and are evaluated over short windows (typically 1 or 10 seconds), so 600 RPM allows about 10 requests per second and a 400-request burst is rejected even though the per-minute total is under the limit. Tokens aren't the issue: 400 requests of at most 200 tokens stay under 100,000 TPM however they're counted. An oversized prompt returns a 400 error rather than 429, regional quota only limits how much TPM you can assign to deployments, and provisioned utilization applies to PTU deployments. Smooth the request rate and honor `retry-after-ms`.",
+      "ref": {"title": "Manage Azure OpenAI in Microsoft Foundry Models quota", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/quota"},
+      "tags": ["quota", "429", "rate-limits"]
+    },
+    {
+      "id": "d1b-02",
+      "objective": "1.3",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "A Foundry resource contains a Global Provisioned deployment named `gpt41-ptu` and a Global Standard deployment of the same model version named `gpt41-std`. An interactive checkout app and a bulk-scoring job both call `gpt41-ptu`, which returns HTTP 429 at peak. Checkout requests must use provisioned capacity when it's available and overflow to `gpt41-std` otherwise. Bulk-scoring requests must never incur pay-as-you-go charges. What should you do?",
+      "options": [
+        "Set the `spilloverDeploymentName` property of `gpt41-ptu` to `gpt41-std`",
+        "Send the `x-ms-spillover-deployment: gpt41-std` header on checkout requests only",
+        "Point the checkout app at `gpt41-std` and keep bulk scoring on `gpt41-ptu`",
+        "Create a metric alert on the Provisioned Utilization metric of `gpt41-ptu` at 100 percent"
+      ],
+      "answer": [1],
+      "explanation": "Spillover can be enabled for every request with the `spilloverDeploymentName` deployment property, or per request with the `x-ms-spillover-deployment` header. Only the header lets checkout overflow while bulk-scoring requests, sent without it, keep receiving 429 and never reach the Standard deployment. The deployment property would spill both workloads and takes precedence over the header. Pointing checkout at `gpt41-std` wastes provisioned capacity, and an alert doesn't reroute traffic.",
+      "ref": {"title": "Manage traffic with spillover for provisioned deployments", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/spillover-traffic-management"},
+      "tags": ["ptu", "spillover", "429", "cost"]
+    },
+    {
+      "id": "d1b-03",
+      "objective": "1.3",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "Three internal apps call the same model deployment through Azure API Management, which acts as an AI gateway. Each app uses its own API Management subscription. You must cap every app at 50,000 tokens per minute, return HTTP 429 to an app that exceeds its cap without affecting the other apps, and reject oversized prompts before they reach the model. What should you configure?",
+      "options": [
+        "`llm-emit-token-metric` with a subscription ID dimension and a metric alert at 50,000 tokens",
+        "`llm-token-limit` keyed on subscription ID with `token-quota=\"50000\"`, `token-quota-period=\"Hourly\"` and `estimate-prompt-tokens=\"true\"`",
+        "A 50,000 TPM allocation for the deployment on the Quota page of the Foundry portal",
+        "`llm-token-limit` keyed on subscription ID with `tokens-per-minute=\"50000\"` and `estimate-prompt-tokens=\"true\"`"
+      ],
+      "answer": [3],
+      "explanation": "`llm-token-limit` enforces token consumption per `counter-key`. `tokens-per-minute` is a rate limit that returns 429, and `estimate-prompt-tokens=\"true\"` makes the gateway estimate prompt tokens before it forwards the request. A `token-quota` with a period is a quota: it returns 403 and here would be counted per hour. `llm-emit-token-metric` only reports usage, and the deployment's TPM allocation is a single bucket shared by all three apps.",
+      "ref": {"title": "Limit large language model API token usage", "url": "https://learn.microsoft.com/en-us/azure/api-management/llm-token-limit-policy"},
+      "tags": ["api-management", "ai-gateway", "rate-limits"]
+    },
+    {
+      "id": "d1b-04",
+      "objective": "1.3",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A prompt agent that answers from an Azure AI Search index is in production. Application Insights is connected to the Foundry project. You must score live responses for groundedness as each response completes, limit the evaluation to 100 responses per hour to control judge-model cost, and show the scores on the agent's Monitor tab. What should you configure?",
+      "options": [
+        "Continuous evaluation for the agent, capped at 100 evaluation runs per hour",
+        "A scheduled evaluation that sends a fixed set of test queries to the agent every hour",
+        "A scheduled red teaming run for the agent that executes every hour",
+        "A diagnostic setting that sends the `RequestResponse` log category to Log Analytics"
+      ],
+      "answer": [0],
+      "explanation": "Continuous evaluation scores production responses as they complete and supports an hourly cap, and its results feed the evaluation charts on the Monitor tab. In today's SDK it's an evaluation rule triggered on response completion whose action takes `max_hourly_runs`; the earlier preview API used a sampling configuration with a maximum number of requests per hour. A scheduled evaluation over fixed test queries helps detect drift but doesn't score live traffic, red teaming probes for safety failures rather than grounding quality, and resource logs contain no evaluator scores.",
+      "ref": {"title": "Set up continuous and scheduled evaluation", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/continuous-scheduled-evaluation"},
+      "tags": ["monitoring", "continuous-evaluation", "groundedness"]
+    },
+    {
+      "id": "d1b-05",
+      "objective": "1.3",
+      "type": "multi",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You create a Foundry project with default settings and deploy a prompt agent. After a day of production traffic, the agent's Monitor tab and the Traces view are empty. The dashboard and traces must populate without changing application code, and an operations engineer who has only the Azure AI User role on the project must be able to query the telemetry. Which two actions should you perform? Each correct answer presents part of the solution.",
+      "options": [
+        "Assign the engineer the Azure AI Account Owner role on the Foundry resource",
+        "Connect an Application Insights resource to the Foundry project",
+        "Add `AIProjectInstrumentor().instrument()` to the client application",
+        "Assign the engineer the Log Analytics Reader role on the Application Insights resource",
+        "Create a diagnostic setting that archives `RequestResponse` logs to a storage account"
+      ],
+      "answer": [1, 3],
+      "explanation": "The Agent Monitoring Dashboard and the trace views read from the Application Insights resource connected to the project; once it's connected, server-side tracing is enabled automatically with no code change. Querying that telemetry requires access to the Application Insights resource, and the documented role is Log Analytics Reader. Client-side instrumentation is optional and is a code change, Azure AI Account Owner is a control-plane role that grants no telemetry access, and resource logs in storage don't feed the dashboard. The Azure AI roles are named Foundry User and Foundry Account Owner since May 2026.",
+      "ref": {"title": "Monitor agents with the Agent Monitoring Dashboard", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/how-to-monitor-agents-dashboard"},
+      "tags": ["monitoring", "tracing", "application-insights"]
+    },
+    {
+      "id": "d1b-06",
+      "objective": "1.3",
+      "type": "single",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "A RAG app queries an Azure AI Search service that has one replica and two partitions. During business hours, search requests intermittently return HTTP 503 and the Throttled search queries percentage metric spikes. Index storage is 30 percent used and indexers run only at night. Relevance settings must not change. What should you do to resolve the throttling?",
+      "options": [
+        "Add partitions to the search service",
+        "Add replicas to the search service",
+        "Change the agent tool's `query_type` to `simple`",
+        "Enable a diagnostic setting for `OperationLogs`"
+      ],
+      "answer": [1],
+      "explanation": "A throttled query returns 503, and the documented remedy for query-based throttling is more replicas, which add query throughput. Partitions are the remedy for indexing-based throttling and add storage, which isn't the bottleneck here. Changing the query type alters relevance behavior, and a diagnostic setting only records operations. Docs today call the service Foundry IQ (Azure AI Search).",
+      "ref": {"title": "Analyze performance in Foundry IQ (Azure AI Search)", "url": "https://learn.microsoft.com/en-us/azure/search/search-performance-analysis"},
+      "tags": ["azure-ai-search", "monitoring", "capacity"]
+    },
+    {
+      "id": "d1b-07",
+      "objective": "1.3",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "An indexer with a skillset loads PDF files into an Azure AI Search index that grounds an agent. Users report that some documents never appear in answers. Get Indexer Status returns a top-level `status` of `running`, and `lastResult` shows a `status` of `success` with `itemsFailed` equal to 14. Which statement correctly interprets the response?",
+      "options": [
+        "The indexer is executing now, and the 14 items are queued for retry",
+        "The indexer was reset and is reprocessing every document",
+        "The last run stopped early because the 14 failures exceeded the max failed items setting",
+        "The last run completed, and the 14 failures stayed within the max failed items setting"
+      ],
+      "answer": [3],
+      "explanation": "The top-level `status` describes the indexer itself: `running` means it's configured and available, not that a run is active (an active run reports `inProgress`). A run is reported as successful even when individual documents fail, as long as the failures stay below the indexer's max failed items setting, so those 14 documents are simply missing from the index. A reset appears as a separate history entry with the status `reset`. Review the run's errors and warnings, and use a debug session if a skill is the cause.",
+      "ref": {"title": "Monitor indexer status and results in Foundry IQ (Azure AI Search)", "url": "https://learn.microsoft.com/en-us/azure/search/search-monitor-indexers"},
+      "tags": ["azure-ai-search", "indexer", "ingestion"]
+    },
+    {
+      "id": "d1b-08",
+      "objective": "1.3",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You publish an agent from a Foundry project as an Agent Application. A web app that runs in Azure Container Apps with a user-assigned managed identity must invoke the published agent by using the Responses API. The identity must not get access to the Foundry project, to other agents, or to model deployments. Which role assignment should you create?",
+      "options": [
+        "Azure AI User at the scope of the Foundry project",
+        "Azure AI Project Manager at the scope of the Foundry resource",
+        "Azure AI User at the scope of the Agent Application resource",
+        "Cognitive Services OpenAI User at the scope of the Foundry resource"
+      ],
+      "answer": [2],
+      "explanation": "Publishing creates an Agent Application, a separate Azure resource with its own RBAC scope. A caller needs Azure AI User (or a custom role with the `applications/invoke/action` permission) on that resource, which grants access to the one published agent and nothing else in the project. The same role at project scope would also let the identity build and edit agents, Azure AI Project Manager is the role for publishing, and Cognitive Services roles aren't meant for Foundry agent scenarios. Since May 2026 the role is named Foundry User, and for agents on the newer agent endpoint model the docs recommend Foundry Agent Consumer assigned at the scope of the individual agent.",
+      "ref": {"title": "Publish your agent as an Agent Application", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/agent-applications"},
+      "tags": ["rbac", "least-privilege", "agents", "managed-identity"]
+    },
+    {
+      "id": "d1b-09",
+      "objective": "1.3",
+      "type": "single",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "Developers who have the Azure AI User role on a project report that the model deployment dialog in the Foundry portal doesn't show available quota and can't validate deployments. You must fix this by granting the least privilege. What should you assign to the developers?",
+      "options": [
+        "Cognitive Services Usages Reader at the subscription scope",
+        "Cognitive Services Usages Reader at the Foundry resource scope",
+        "Reader at the resource group scope",
+        "Azure AI Account Owner at the Foundry resource scope"
+      ],
+      "answer": [0],
+      "explanation": "Quota and usage data comes from a subscription-level Usages API, so the role must be assigned at subscription scope; Cognitive Services Usages Reader is the minimal role for it. The same role at resource or resource group scope doesn't authorize the API, and neither does Reader below the subscription. Azure AI Account Owner (named Foundry Account Owner since May 2026) is far more privileged and still isn't a subscription-scope assignment. Subscription Reader would also work but grants broader read access.",
+      "ref": {"title": "Role-based access control for Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/rbac-foundry"},
+      "tags": ["quota", "rbac", "least-privilege"]
+    },
+    {
+      "id": "d1b-10",
+      "objective": "1.3",
+      "type": "yesno",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "Your company uses one Foundry resource that contains two projects. You are planning role assignments by using built-in roles and Microsoft Entra ID authentication. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "A user who has only the Azure AI Account Owner role on the Foundry resource can deploy models but can't build agents in a project.", "answer": true},
+        {"text": "A user who has only the Azure Owner role on the subscription can build agents in the projects by using Microsoft Entra ID without any additional role.", "answer": false},
+        {"text": "Azure AI Project Manager on the Foundry resource is the minimum built-in role for publishing an agent.", "answer": true}
+      ],
+      "explanation": "Azure AI Account Owner is a control-plane role: it can create accounts and projects and manage models, but it has no data actions, so its holder also needs Azure AI User to build. Azure Owner can assign roles and manage resources but likewise has no data-plane access until a data role is assigned. Publishing agents requires at least Azure AI Project Manager at the Foundry resource scope. Since May 2026 these roles are named Foundry Account Owner, Foundry User and Foundry Project Manager; role IDs and permissions are unchanged.",
+      "ref": {"title": "Role-based access control for Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/rbac-foundry"},
+      "tags": ["rbac", "roles", "control-plane", "data-plane"]
+    },
+    {
+      "id": "d1b-11",
+      "objective": "1.3",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You are moving a Python app from API keys to Microsoft Entra ID. The app runs under a managed identity and uses the OpenAI SDK against the v1 endpoint of a Foundry resource named contoso-foundry. Complete the code.",
+      "code": "from openai import OpenAI\nfrom azure.identity import DefaultAzureCredential, get_bearer_token_provider\n\ntoken_provider = get_bearer_token_provider(\n    DefaultAzureCredential(),\n    \"https://ai.azure.com/.default\",\n)\n\nclient = OpenAI(\n    base_url=\"[[1]]\",\n    [[2]]=token_provider,\n)\n\nresponse = client.responses.create(\n    model=\"gpt-4.1-mini\",\n    input=\"Summarize the incident report.\",\n)\nprint(response.output_text)",
+      "blanks": [
+        {"options": ["https://contoso-foundry.openai.azure.com/openai/deployments/gpt-4.1-mini", "https://contoso-foundry.openai.azure.com/openai/v1/", "https://contoso-foundry.services.ai.azure.com/models"], "answer": 1},
+        {"options": ["azure_ad_token_provider", "credential", "api_key"], "answer": 2}
+      ],
+      "explanation": "The v1 route of a Foundry resource is `https://<resource>.openai.azure.com/openai/v1/`, and with the plain `OpenAI` client the token provider callable is passed as `api_key`; the client calls it before each request and sends the result as a bearer token. `azure_ad_token_provider` belongs to the older `AzureOpenAI` client, the `/openai/deployments/...` path is the pre-v1 route, and `/models` is the Azure AI Inference route. Scope note: today's keyless how-to requests `https://ai.azure.com/.default`, while many Azure OpenAI samples, including exam-era ones, request `https://cognitiveservices.azure.com/.default`; recognize both.",
+      "ref": {"title": "Configure keyless authentication with Microsoft Entra ID", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/configure-entra-id"},
+      "tags": ["keyless", "entra-id", "python-sdk", "responses-api"]
+    },
+    {
+      "id": "d1b-12",
+      "objective": "1.3",
+      "type": "multi",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "A Foundry resource uses Standard agent setup with virtual network injection. An agent uses the Azure AI Search tool to query a search service that has public network access disabled and a private endpoint in the virtual network. The project connection to the search service uses an API key, and tool calls fail with 'Unable to connect ... DNS server returned answer with no data'. The search service must stay unreachable from the internet. Which two actions should you perform? Each correct answer presents part of the solution.",
+      "options": [
+        "Regenerate the search admin key and update the project connection",
+        "Change the project connection to Microsoft Entra ID (managed identity) authentication",
+        "Set the indexer's `executionEnvironment` property to `Private`",
+        "Enable public network access on the search service for selected IP addresses",
+        "Assign Search Index Data Contributor and Search Service Contributor to the managed identity on the search service"
+      ],
+      "answer": [1, 4],
+      "explanation": "With private virtual networking, the Azure AI Search tool supports only keyless connections that use the project managed identity; key-based connections fail with exactly this connectivity error. The identity then needs Search Index Data Contributor and Search Service Contributor on the search service, which must also allow role-based access. A new key doesn't change the authentication type, opening public access violates the requirement, and `executionEnvironment` governs indexer ingestion through private endpoints, not agent queries. Docs today call the service Foundry IQ (Azure AI Search).",
+      "ref": {"title": "Connect a Foundry IQ (Azure AI Search) index to Foundry agents", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/ai-search"},
+      "tags": ["private-networking", "managed-identity", "azure-ai-search", "agents"]
+    },
+    {
+      "id": "d1b-13",
+      "objective": "1.3",
+      "type": "order",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "An App Service web app calls a model deployment in a Foundry resource by using an API key stored in app settings. Security policy now requires keyless authentication and that key-based access to the Foundry resource be blocked. The migration must not cause downtime. Which actions should you perform in sequence? Not all actions are used.",
+      "items": [
+        "Enable a managed identity on the web app",
+        "Assign the managed identity a data-plane role that allows inference on the Foundry resource",
+        "Deploy app code that authenticates with a Microsoft Entra token credential instead of the key",
+        "Set `disableLocalAuth` to `true` on the Foundry resource",
+        "Send a request with the old key and confirm that it returns HTTP 401"
+      ],
+      "distractors": [
+        "Regenerate both keys and move them to Azure Key Vault",
+        "Assign the managed identity the Contributor role on the resource group"
+      ],
+      "explanation": "The identity must exist before it can receive a role, and the role must be in place before the token-based code goes live, or calls would fail. The keyless how-to names Cognitive Services User for inference on the model endpoint; for project and agent work the role is Azure AI User (named Foundry User since May 2026). Only after every caller uses tokens do you disable local authentication, and because enforcement can lag, you confirm that the old key now gets a 401. Keys in Key Vault are still keys, and Contributor is a control-plane role that doesn't grant inference access.",
+      "ref": {"title": "Configure keyless authentication with Microsoft Entra ID", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/configure-entra-id"},
+      "tags": ["keyless", "managed-identity", "disable-local-auth"]
+    }
+  ]
+}

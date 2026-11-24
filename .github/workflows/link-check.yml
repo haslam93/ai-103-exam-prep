@@ -1,0 +1,44 @@
+name: Link check
+
+# Microsoft Learn moves and retires pages often. Once a week this requests every reference URL
+# in the content and keeps one issue up to date with the ones that are gone or have moved.
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Check every reference URL
+        id: check
+        run: node scripts/check-links.mjs --report build/link-report.md
+
+      - name: Open, refresh or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FAILING: ${{ steps.check.outputs.failing }}
+        run: |
+          gh label create broken-links --color D93F0B --description "A reference URL is gone or has moved" --force
+          number=$(gh issue list --label broken-links --state open --json number --jq '.[0].number // empty')
+          if [ "$FAILING" != "0" ]; then
+            if [ -z "$number" ]; then
+              gh issue create --title "Reference links need attention" --label broken-links --body-file build/link-report.md
+            else
+              gh issue edit "$number" --body-file build/link-report.md
+            fi
+          elif [ -n "$number" ]; then
+            gh issue close "$number" --comment "Every reference link passes again."
+          fi

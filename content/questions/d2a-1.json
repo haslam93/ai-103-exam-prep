@@ -1,0 +1,382 @@
+{
+  "part": "d2a",
+  "domain": 2,
+  "cheatsheet": [
+    {
+      "title": "Pick the SDK and endpoint (need -> use)",
+      "kind": "table",
+      "columns": ["Need", "Client", "Endpoint / auth"],
+      "rows": [
+        ["Project features: connections, cloud evaluations, agents, tracing, Foundry platform tools", "`AIProjectClient` (`azure-ai-projects` 2.x), then `get_openai_client()` for Responses", "`https://YOUR-RESOURCE.services.ai.azure.com/api/projects/YOUR-PROJECT` - Entra ID only"],
+        ["Plain inference with maximum OpenAI compatibility or lowest latency; embeddings; image generation", "`OpenAI` client (v1 API)", "`https://YOUR-RESOURCE.openai.azure.com/openai/v1/` - token provider or API key, no `api-version`"],
+        ["Responses API for Foundry Models sold by Azure (DeepSeek, Grok, MAI-DS-R1, Llama) without the Foundry SDK", "`OpenAI` client on the project route", "`{project_endpoint}/openai/v1`"],
+        ["Anthropic Claude deployments", "Anthropic SDK (`AnthropicFoundry`), Messages API", "`https://YOUR-RESOURCE.services.ai.azure.com/anthropic`"],
+        ["Code-first multi-agent or multistep orchestration", "Microsoft Agent Framework", "Docs today: its `FoundryChatClient` calls `{project_endpoint}/openai/v1/responses`"],
+        ["Vision, Speech, Language, Content Safety, Document Intelligence", "Foundry Tools SDKs (formerly Azure AI services)", "`https://YOUR-RESOURCE.cognitiveservices.azure.com/` (Speech and Translator have their own hosts)"],
+        ["A feature tied to a dated API version", "`AzureOpenAI` client", "`azure_endpoint` + `api_version` (pre-v1 pattern)"]
+      ],
+      "note": "Both eras: an Azure OpenAI resource has no project endpoint; API keys work on `/openai/v1` but not with `AIProjectClient`. Docs today: use the `/openai/v1` endpoint for `embeddings.create`, because the project endpoint does not currently route embedding requests (not confirmed for April 2026). Exam era (Apr 2026): `azure-ai-inference` (`ChatCompletionsClient`, `/models` endpoint) still existed and can appear in exam code. Docs today: it retired on August 26, 2026.",
+      "ref": {"title": "Microsoft Foundry SDKs and endpoints", "url": "https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview"}
+    },
+    {
+      "title": "Connect keyless: Foundry SDK vs OpenAI v1 client",
+      "kind": "code",
+      "lang": "python",
+      "code": "from azure.ai.projects import AIProjectClient\nfrom azure.identity import DefaultAzureCredential, get_bearer_token_provider\nfrom openai import OpenAI\n\n# Foundry SDK: one project endpoint, Entra ID only\nproject = AIProjectClient(endpoint=PROJECT_ENDPOINT, credential=DefaultAzureCredential())\nopenai = project.get_openai_client()\nr1 = openai.responses.create(model=\"gpt-5-mini\", instructions=\"Be concise.\", input=\"Size of France?\")\nr2 = openai.responses.create(model=\"gpt-5-mini\", input=\"And its capital?\", previous_response_id=r1.id)\nprint(r2.output_text)\n\n# OpenAI SDK on the v1 endpoint: no api-version, token auto-refresh\ntp = get_bearer_token_provider(DefaultAzureCredential(), \"https://ai.azure.com/.default\")\nclient = OpenAI(base_url=\"https://YOUR-RESOURCE.openai.azure.com/openai/v1/\", api_key=tp)\nemb = client.embeddings.create(model=\"text-embedding-3-small\", input=\"hello\")\nprint(len(emb.data[0].embedding))",
+      "note": "`model` is always the deployment name, not the catalog model ID. Use `OpenAI`, not `AzureOpenAI`, on the v1 endpoint and pass the token provider callable itself as `api_key` to get automatic refresh. Exam era (Apr 2026): `azure-ai-projects` 2.0.x (GA March 6, 2026) and developer role Azure AI User on the project; the training module still shows the 1.x call `get_openai_client(api_version=...)`. Docs today: `azure-ai-projects>=2.3.0`, and the role is named Foundry User (since May 2026). Scope `https://ai.azure.com/.default` is in today's docs and the training module; older Azure OpenAI samples use `https://cognitiveservices.azure.com/.default`. For a standalone Azure OpenAI resource the docs list Cognitive Services OpenAI User.",
+      "ref": {"title": "Azure OpenAI in Microsoft Foundry Models v1 API", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle"}
+    },
+    {
+      "title": "Responses API vs Chat Completions",
+      "kind": "table",
+      "columns": ["Aspect", "Responses API", "Chat Completions"],
+      "rows": [
+        ["Call", "`client.responses.create(model, input, instructions)`", "`client.chat.completions.create(model, messages)`"],
+        ["Text result", "`response.output_text`", "`completion.choices[0].message.content`"],
+        ["State", "Stateful: `previous_response_id` or `conversation=conversation.id`; responses retained 30 days by default; `store=False` for stateless", "Stateless: resend `messages` every turn"],
+        ["Structured output", "`text={\"format\": {\"type\": \"json_schema\", \"name\", \"schema\", \"strict\"}}`; `responses.parse(text_format=Model)` -> `output_parsed`", "`response_format={\"type\": \"json_schema\", \"json_schema\": {\"name\", \"strict\", \"schema\"}}`; `beta.chat.completions.parse(response_format=Model)` -> `message.parsed`"],
+        ["Function tool definition", "Flat: `{\"type\": \"function\", \"name\", \"description\", \"parameters\", \"strict\"}`", "Nested: `{\"type\": \"function\", \"function\": {...}}`"],
+        ["Tool call round trip", "Output item `type: \"function_call\"` (`name`, `arguments`, `call_id`) -> send `{\"type\": \"function_call_output\", \"call_id\", \"output\"}`", "`message.tool_calls[]` -> send `{\"role\": \"tool\", \"tool_call_id\", \"content\"}`"],
+        ["Force a tool", "`tool_choice`: `none`, `auto`, `required`, or `{\"type\": \"function\", \"name\": \"...\"}`", "`tool_choice={\"type\": \"function\", \"function\": {\"name\": \"...\"}}`"],
+        ["Output token cap", "`max_output_tokens`", "`max_completion_tokens` for reasoning models (`max_tokens` unsupported)"],
+        ["Built-in tools", "`code_interpreter`, `file_search`, `web_search`, `mcp`, `image_generation`", "Function tools only (the MCP tool works only in the Responses API)"],
+        ["Multimodal content parts", "`input_text`, `input_image` (`image_url` string or `file_id`), `input_file` (PDF)", "`text`, `image_url` object"],
+        ["Guardrail annotations", "Top-level `content_filters` array, read through `response.model_extra`", "`prompt_filter_results` / `content_filter_results`"],
+        ["Model support", "Recommended for new work; the only API for codex models, `gpt-5-pro`, `o3-pro`", "Kept for existing code and cross-platform compatibility"]
+      ],
+      "note": "With the Responses API, a blocked prompt returns HTTP 400 with code `content_filter` (raised as `BadRequestError` in Python). A `model` value that does not match a deployment name returns 404.",
+      "ref": {"title": "Use the Azure OpenAI Responses API", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses"}
+    },
+    {
+      "title": "Function-calling loop with the Responses API",
+      "kind": "code",
+      "lang": "python",
+      "code": "tools = [{\"type\": \"function\", \"name\": \"get_weather\",\n          \"description\": \"Get weather for a location\", \"strict\": True,\n          \"parameters\": {\"type\": \"object\",\n                         \"properties\": {\"location\": {\"type\": \"string\"}},\n                         \"required\": [\"location\"],\n                         \"additionalProperties\": False}}]\nresp = client.responses.create(model=MODEL, input=question, tools=tools)\noutputs = []\nfor item in resp.output:\n    if item.type == \"function_call\":\n        args = json.loads(item.arguments)          # arguments is a JSON string\n        outputs.append({\"type\": \"function_call_output\",\n                        \"call_id\": item.call_id,   # must echo the call_id\n                        \"output\": json.dumps(get_weather(**args))})\nfinal = client.responses.create(model=MODEL, input=outputs,\n                                previous_response_id=resp.id)\nprint(final.output_text)",
+      "note": "The model only requests the call; your app runs the function. Without `previous_response_id`, append `resp.output` (which holds the `function_call` items) to your input list before the `function_call_output` items. Strict mode needs every property in `required` and `additionalProperties: false`; structured outputs are not supported with parallel function calls, so set `parallel_tool_calls` to `false`.",
+      "ref": {"title": "Use the Azure OpenAI Responses API - Function calling", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses"}
+    },
+    {
+      "title": "Structured outputs: strict-mode rules and limits",
+      "kind": "bullets",
+      "bullets": [
+        "Responses API: schema goes in `text.format`, with `type`, `name`, `schema`, and `strict` as sibling properties. Chat Completions: `response_format` with a nested `json_schema` object.",
+        "All fields must be listed in `required`. Emulate an optional field with a null union: `\"type\": [\"string\", \"null\"]`.",
+        "Every object must set `\"additionalProperties\": false`.",
+        "The root object cannot be `anyOf`. Nested `anyOf`, `$defs` / `$ref`, and recursive schemas are supported.",
+        "Limits: up to 100 object properties in total and up to 5 levels of nesting. Output keys follow the order of the schema.",
+        "Unsupported keywords: string `minLength`, `maxLength`, `pattern`, `format`; number `minimum`, `maximum`, `multipleOf`; array `minItems`, `maxItems`, `uniqueItems`, `contains`; object `patternProperties`, `minProperties`, `maxProperties`.",
+        "Function calling: add `\"strict\": true` to the function definition; not supported with parallel function calls.",
+        "JSON mode (`json_object`) guarantees valid JSON only - not adherence to your schema.",
+        "Python helpers: `client.responses.parse(..., text_format=PydanticModel)` -> `response.output_parsed`; Chat Completions uses `client.beta.chat.completions.parse(..., response_format=PydanticModel)` -> `message.parsed`."
+      ],
+      "note": "Supported types: String, Number, Boolean, Integer, Object, Array, Enum, anyOf. Structured outputs are not supported with `gpt-audio` / `gpt-audio-mini`.",
+      "ref": {"title": "Structured outputs", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs"}
+    },
+    {
+      "title": "Responses API: state, streaming, background",
+      "kind": "table",
+      "columns": ["Need", "Setting", "Gotcha"],
+      "rows": [
+        ["Multi-turn without resending history", "`previous_response_id=last_response.id`", "Works only for stored responses (default retention 30 days; `responses.delete(id)` removes one)"],
+        ["Durable conversation object", "`conversation = openai.conversations.create()` then `responses.create(conversation=conversation.id, ...)`", "Client from `AIProjectClient.get_openai_client()`"],
+        ["Client-controlled history or pruning", "`inputs += response.output`, append the next user message, resend", "History is re-sent and re-billed on every turn"],
+        ["No service-side storage", "`store=False` and pass back all output items, including reasoning items with `encrypted_content`", "No `previous_response_id`, no background mode"],
+        ["Token-by-token UI", "`stream=True`; print `event.delta` when `event.type == \"response.output_text.delta\"`; `response.completed` carries `event.response.id`", "Mid-stream failures arrive as an `error` event while the HTTP status is 200"],
+        ["Task that runs for minutes", "`background=True` -> status `queued` / `in_progress` -> poll `responses.retrieve(id)`; `responses.cancel(id)`", "Requires `store=true`; resuming a stream needs `stream=True` on the original request (then pass `starting_after` with the last `sequence_number`)"],
+        ["Long context", "`responses.compact(...)` or `context_management=[{\"type\": \"compaction\", \"compact_threshold\": N}]`", "Docs today; may postdate the April 2026 exam. The compaction item is opaque and encrypted; keep it in the next input"]
+      ],
+      "note": "Stream error types map to status codes: `server_error` 500, `too_many_requests` 429, `forbidden` 403, `user_error` 400. Code Interpreter containers expire after 20 minutes of inactivity and are billed per session.",
+      "ref": {"title": "Use the Azure OpenAI Responses API", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses"}
+    },
+    {
+      "title": "Grounding and tool selection (need -> use)",
+      "kind": "table",
+      "columns": ["Requirement", "Use", "Notes"],
+      "rows": [
+        ["Answer from a set of uploaded files, no search service to manage", "`file_search` tool + vector store", "`vector_stores.create` -> `vector_stores.files.upload_and_poll` -> `tools=[{\"type\": \"file_search\", \"vector_store_ids\": [id]}]`. Auto parse/chunk/embed; defaults 800-token chunks, 400 overlap, `text-embedding-3-large` at 256 dimensions, 20 chunks max"],
+        ["Existing index, simple and fast single query, full control of the pipeline", "Classic RAG on Azure AI Search", "App runs a hybrid query (optionally semantic ranker), injects passages into the prompt, then calls the model: retrieve -> augment -> generate"],
+        ["Complex conversational questions, several sources, citations, new builds", "Azure AI Search knowledge base with agentic retrieval (Foundry IQ)", "LLM query planning -> parallel subqueries -> semantic rerank -> grounding data with citations; knowledge sources + knowledge base. Exam era: knowledge bases GA in API 2026-04-01, with query planning and answer synthesis still in preview"],
+        ["Current public information", "`web_search` tool", "`tools=[{\"type\": \"web_search\"}]`"],
+        ["Calculations, data analysis, charts, file conversion", "`code_interpreter` tool", "`{\"type\": \"code_interpreter\", \"container\": {\"type\": \"auto\"}}`; sandboxed Python, extra per-session charge"],
+        ["Call your own API or business logic", "`function` tool", "App executes the function and returns `function_call_output`"],
+        ["Tools hosted on a remote MCP server", "`mcp` tool", "`server_label`, `server_url`, `require_approval`, `headers`; approval is required by default (`mcp_approval_request` -> `mcp_approval_response`)"],
+        ["Change model behavior or style, not knowledge", "Fine-tuning", "RAG adds knowledge; fine-tuning changes behavior"],
+        ["Azure OpenAI On Your Data (`data_sources` on chat completions)", "Exam era only", "Exam era (Apr 2026): still available and may appear as an option. Docs today: retired October 14, 2026 -> knowledge base or classic RAG"]
+      ],
+      "note": "Exam era (Apr 2026): the service is Azure AI Search, and Foundry IQ (preview since November 2025) is the knowledge-base layer that agents call. Docs today (since November 2026): the whole service is named Foundry IQ (Azure AI Search). Hybrid search is the recommended mode for generative AI apps. Apply access control at retrieval time (security filters) and treat retrieved text as untrusted input (indirect prompt injection).",
+      "ref": {"title": "Retrieval augmented generation (RAG) and indexes", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/retrieval-augmented-generation"}
+    },
+    {
+      "title": "Evaluators: what they measure and what they need",
+      "kind": "table",
+      "columns": ["Evaluator", "Measures", "Required inputs", "Judge model?", "Output"],
+      "rows": [
+        ["Groundedness (`builtin.groundedness`)", "Response stays within the context, no fabrication (precision)", "`response`, `context` (`query` optional)", "Yes", "1-5, pass at or above 3"],
+        ["Groundedness Pro (preview)", "Strict consistency with context via Azure AI Content Safety", "`query`, `response`, `context`", "No", "True / False"],
+        ["Relevance", "Response addresses the query", "`query`, `response`", "Yes", "1-5"],
+        ["Retrieval", "Retrieved chunks are relevant to the query", "`query`, `context`", "Yes", "1-5"],
+        ["Response Completeness (preview)", "Nothing critical missing versus ground truth (recall)", "`ground_truth`, `response`", "Yes", "1-5"],
+        ["Document Retrieval", "Search quality: Fidelity, NDCG, XDCG, Max Relevance, Holes", "`retrieval_ground_truth`, `retrieved_documents`", "No", "Composite metrics"],
+        ["Coherence / Fluency", "Logical flow / language quality", "`query` + `response` / `response`", "Yes", "1-5"],
+        ["F1, BLEU, GLEU, ROUGE, METEOR", "Token or n-gram overlap", "`response`, `ground_truth`", "No", "Score"],
+        ["Violence, Sexual, Self-Harm, Hate and Unfairness", "Harm severity", "`query`, `response`", "No (hosted safety models)", "0-7, pass at or below 3; aggregated as defect rate"],
+        ["Indirect Attack (XPIA), Protected Material, Code Vulnerability", "Whether the risk is present", "`query`, `response`", "No", "Pass / fail"]
+      ],
+      "note": "Direction trap: quality evaluators pass when score >= threshold (default 3); content-safety evaluators pass when severity <= threshold (default 3). Exam era (Apr 2026): the local SDK `azure-ai-evaluation` was in the main docs (docs today label that page classic): `GroundednessEvaluator(model_config)`, composites `QAEvaluator` and `ContentSafetyEvaluator`; safety evaluators and `GroundednessProEvaluator` take `azure_ai_project` instead of `model_config`; `evaluate(data=..., evaluators={...}, evaluator_config={...})` maps columns with `${data.context}`.",
+      "ref": {"title": "Built-in evaluators reference", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/built-in-evaluators"}
+    },
+    {
+      "title": "Evaluate groundedness in code: local SDK and cloud evals API",
+      "kind": "code",
+      "lang": "python",
+      "code": "# Exam-era local SDK: azure-ai-evaluation (labelled classic today)\ngroundedness = GroundednessEvaluator(model_config)   # judge = your GPT deployment\nresult = evaluate(data=\"data.jsonl\",\n    evaluators={\"groundedness\": groundedness},\n    evaluator_config={\"groundedness\": {\"column_mapping\": {\n        \"context\": \"${data.context}\", \"response\": \"${data.response}\"}}},\n    azure_ai_project=azure_ai_project)               # optional: log to the project\n# Cloud evaluation: Foundry SDK evals API\ncriteria = [{\"type\": \"azure_ai_evaluator\", \"name\": \"groundedness\",\n             \"evaluator_name\": \"builtin.groundedness\",\n             \"initialization_parameters\": {\"deployment_name\": judge},\n             \"data_mapping\": {\"context\": \"{{item.context}}\",\n                              \"response\": \"{{item.response}}\"}}]\nev = openai_client.evals.create(name=\"rag-eval\",\n    data_source_config=data_source_config, testing_criteria=criteria)\nrun = openai_client.evals.runs.create(eval_id=ev.id, name=\"run-1\",\n    data_source={\"type\": \"jsonl\", \"source\": {\"type\": \"file_id\", \"id\": data_id}})\nrun = openai_client.evals.runs.retrieve(run_id=run.id, eval_id=ev.id)  # poll",
+      "note": "Local SDK: `model_config` is an `AzureOpenAIModelConfiguration`; safety evaluators and `GroundednessProEvaluator` take `azure_ai_project` instead; the result has aggregate `metrics` and per-row `rows`. Cloud: `openai_client = project_client.get_openai_client()`; `data_id` comes from `project_client.datasets.upload_file(...)`; `{{item.x}}` = dataset column and `{{sample.output_text}}` = text generated by a model target; poll until `completed`, `failed`, or `canceled`, then read `evals.runs.output_items.list(...)`. The cloud evals API has been in `azure-ai-projects` since the 2.0.0 beta releases (late 2025), so both paths are exam-era. The judge-model key appears as `deployment_name` on evaluator reference pages and as `model` in the dataset how-to. Role: Azure AI User on the project (named Foundry User today).",
+      "ref": {"title": "Evaluate existing datasets with Microsoft Foundry SDK", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/cloud-evaluation-datasets"}
+    },
+    {
+      "title": "Exam era (April 2026) vs docs today (November 2026)",
+      "kind": "bullets",
+      "bullets": [
+        "Azure AI Search. Exam era (Apr 2026): that is the service name, and Foundry IQ (preview since November 2025) is the knowledge-base layer that agents call. Docs today: the whole service is renamed Foundry IQ (Azure AI Search) since November 2026.",
+        "Roles. Exam era (Apr 2026): Azure AI User (least-privilege developer role), Azure AI Project Manager, Azure AI Account Owner, Azure AI Owner. Docs today (renamed May 2026, same role IDs): Foundry User, Foundry Project Manager, Foundry Account Owner, Foundry Owner. Both eras: Contributor has no data actions; Azure AI Developer applies to hubs and Azure Machine Learning workspaces, not Foundry projects.",
+        "`azure-ai-inference` (`ChatCompletionsClient`, `https://YOUR-RESOURCE.services.ai.azure.com/models`). Exam era (Apr 2026): still available. Docs today: retired August 26, 2026 -> `OpenAI` client on `/openai/v1/`.",
+        "Azure OpenAI On Your Data (`data_sources`). Exam era (Apr 2026): still available. Docs today: retired October 14, 2026 -> knowledge base, or classic RAG with app-managed answer generation.",
+        "Foundry workflows (preview). Exam era (Apr 2026): the visual, declarative way to orchestrate agents in the portal (patterns: sequential, group chat, human in the loop; Power Fx expressions; YAML view). Docs today: retiring December 1, 2026 -> Microsoft Agent Framework (recommended), Azure Logic Apps (visual), or A2A.",
+        "Prompt flow (Foundry classic and Azure Machine Learning). Docs today: retires April 20, 2027 and is not recommended for new development -> Microsoft Agent Framework.",
+                "Both eras - Agent Framework orchestrations: sequential, concurrent, handoff, group chat, Magentic.",
+                "Evaluation SDKs. Exam era (Apr 2026): local `evaluate()` in `azure-ai-evaluation` was in the main docs, alongside the cloud `openai_client.evals` API (in `azure-ai-projects` since the 2.0.0 beta releases of late 2025). Docs today: the local SDK page is labelled classic.",
+                "Both eras - codex models (`gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.1-codex*`, `gpt-5-codex`), `gpt-5-pro`, and `o3-pro` are Responses API only.",
+                "Both eras - deployment default is Global Standard; Data Zone Standard keeps processing in the EU, US, or APAC zone with higher default quota than regional Standard; Global Batch is 50 percent cheaper with a 24-hour target."
+      ],
+      "note": "The exam is frozen at the April 16, 2026 outline: answer with the exam-era product and names (Azure AI Search, Azure AI User, workflows, `azure-ai-evaluation`), and use today's names only to search Learn.",
+      "ref": {"title": "Build a workflow in Microsoft Foundry (retirement and migration guide)", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/workflow"}
+    }
+  ],
+  "triggers": [
+    {"when": "List project connections, run cloud evaluations, or manage agents from code", "pick": "`AIProjectClient` on the project endpoint, plus `get_openai_client()`", "why": "The project client covers Foundry-native operations that the OpenAI client has no equivalent for."},
+    {"when": "Maximum OpenAI compatibility, lowest latency, or reuse of existing OpenAI code", "pick": "`OpenAI` client with `base_url` = `https://YOUR-RESOURCE.openai.azure.com/openai/v1/`", "why": "The v1 API needs no `api-version` and no Azure-specific client."},
+    {"when": "No API keys, keyless, automatic token refresh", "pick": "`get_bearer_token_provider(DefaultAzureCredential(), \"https://ai.azure.com/.default\")` passed as `api_key`", "why": "The `OpenAI` client refreshes Entra tokens itself when given the provider callable. Older Azure OpenAI samples use the scope `https://cognitiveservices.azure.com/.default`."},
+    {"when": "Generate embeddings for an index", "pick": "`embeddings.create` on the `/openai/v1/` endpoint", "why": "The v1 endpoint is the documented route for embeddings; today's docs add that the project endpoint does not route them."},
+    {"when": "Keep conversation context without resending earlier turns", "pick": "`previous_response_id` (or a `conversation` ID)", "why": "The Responses API is stateful; Chat Completions is not."},
+    {"when": "Service must not store conversation state", "pick": "`store=False` and resend output items, including encrypted reasoning items", "why": "Unstored responses cannot be chained with `previous_response_id` or run in background mode."},
+    {"when": "Output must always conform to a JSON Schema", "pick": "Structured outputs: `text.format` with `type: json_schema` and `strict: true`", "why": "JSON mode only guarantees valid JSON."},
+    {"when": "Optional field in a strict schema", "pick": "Keep it in `required` and type it as `[\"string\", \"null\"]`", "why": "Strict mode requires every field to be required."},
+    {"when": "Model must call your internal API; or a tool call must be forced", "pick": "`function` tool, return `function_call_output` with the same `call_id`; force with `tool_choice`", "why": "The model requests the call, the app executes it; `required` or a named function forces tool use."},
+    {"when": "Exact calculations, CSV analysis, or charts without custom code", "pick": "`code_interpreter` tool with `container: {\"type\": \"auto\"}`", "why": "It runs model-written Python in a sandbox and can create files."},
+    {"when": "Answer from uploaded documents without managing a search service", "pick": "`file_search` tool with a vector store", "why": "Ingestion parses, chunks, and embeds the files automatically."},
+    {"when": "Complex multi-source questions with LLM query planning and citations", "pick": "Azure AI Search knowledge base with agentic retrieval (Foundry IQ)", "why": "It decomposes the question into parallel subqueries across knowledge sources."},
+    {"when": "Detect fabricated or hallucinated content against the retrieved context", "pick": "Groundedness evaluator (Groundedness Pro for a strict true/false via Content Safety)", "why": "Groundedness checks that the response adds nothing beyond the context."},
+    {"when": "No ground-truth answers are available", "pick": "Groundedness, Relevance, Retrieval, Coherence, Fluency", "why": "Response Completeness, Similarity, F1, BLEU, ROUGE, and METEOR need `ground_truth`."},
+    {"when": "Request runs for minutes or the connection times out", "pick": "`background=True` and poll `responses.retrieve`", "why": "The task is queued server-side; requires stored responses."},
+    {"when": "Codex or pro model fails on `chat.completions.create`", "pick": "`client.responses.create`", "why": "Those models are supported on the Responses API only."}
+  ],
+  "lookup": [
+    {"topic": "Which SDK and endpoint (Foundry SDK, OpenAI v1, Anthropic, Foundry Tools)", "search": "Microsoft Foundry SDKs and endpoints", "url": "https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview"},
+    {"topic": "Responses API: state, streaming, background, tools, image and file input", "search": "Use the Azure OpenAI Responses API", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses"},
+    {"topic": "Structured outputs and strict JSON Schema limits", "search": "structured outputs JSON Schema support and limitations", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs"},
+    {"topic": "v1 API, OpenAI client, token provider, api-version removal", "search": "Azure OpenAI v1 API", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle"},
+    {"topic": "Function calling in Chat Completions (tool_calls, tool_choice, parallel calls)", "search": "function calling Microsoft Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/function-calling"},
+    {"topic": "Evaluator catalog", "search": "built-in evaluators reference", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/built-in-evaluators"},
+    {"topic": "Groundedness, Groundedness Pro, Relevance, Retrieval: inputs and outputs", "search": "RAG evaluators groundedness", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/evaluation-evaluators/rag-evaluators"},
+    {"topic": "Cloud evaluation with the evals API (datasets, targets, results)", "search": "cloud evaluation Microsoft Foundry SDK", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/cloud-evaluation"},
+    {"topic": "RAG, agentic retrieval vs classic RAG (Learn now titles Azure AI Search as Foundry IQ)", "search": "retrieval augmented generation and indexes", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/retrieval-augmented-generation"},
+    {"topic": "Deployment types and SKU codes", "search": "deployment types Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types"}
+  ],
+  "flashcards": [
+    {"front": "Foundry project endpoint format", "back": "`https://YOUR-RESOURCE.services.ai.azure.com/api/projects/YOUR-PROJECT`"},
+    {"front": "Azure OpenAI v1 endpoint format", "back": "`https://YOUR-RESOURCE.openai.azure.com/openai/v1/` (the `.services.ai.azure.com/openai/v1/` form also works); no `api-version`."},
+    {"front": "Entra token scope for the Foundry project and `/openai/v1` endpoints", "back": "`https://ai.azure.com/.default` in today's docs and the training module. Older Azure OpenAI samples use `https://cognitiveservices.azure.com/.default`; accept whichever an exam item offers."},
+    {"front": "Which authentication does `AIProjectClient` accept?", "back": "Microsoft Entra ID only (a `TokenCredential` such as `DefaultAzureCredential`). API keys work only on the `/openai/v1` endpoint."},
+    {"front": "What goes in the `model` parameter?", "back": "The deployment name, not the model catalog ID. A mismatch returns 404."},
+    {"front": "Default retention of stored Responses API data", "back": "30 days. Delete a response with `client.responses.delete(id)`; opt out with `store=False`."},
+    {"front": "Background mode prerequisites and statuses", "back": "`background=True` requires `store=true`. Status goes `queued` -> `in_progress` -> terminal; poll `responses.retrieve(id)`, stop with `responses.cancel(id)`."},
+    {"front": "Streaming event that carries incremental text", "back": "`response.output_text.delta` (`event.delta`). `response.completed` carries the final response and its `id`."},
+    {"front": "Item that returns a function result in the Responses API", "back": "`{\"type\": \"function_call_output\", \"call_id\": item.call_id, \"output\": json.dumps(result)}` - `call_id` echoes the value on the `function_call` item."},
+    {"front": "Structured outputs size limits", "back": "Up to 100 object properties and 5 levels of nesting; the root object cannot be `anyOf`."},
+    {"front": "How to express an optional field under `strict: true`", "back": "List it in `required` and use a null union type, for example `[\"string\", \"null\"]`."},
+    {"front": "Code Interpreter container facts", "back": "`\"container\": {\"type\": \"auto\"}`; container expires after 20 minutes idle; billed per session; up to 50 file IDs per request."},
+    {"front": "`file_search` default ingestion settings", "back": "800-token chunks, 400-token overlap, `text-embedding-3-large` at 256 dimensions, 20 chunks max in context; 10,000 files per vector store; 512 MB per file."},
+    {"front": "Groundedness vs Response Completeness", "back": "Groundedness = precision (nothing outside the context). Response Completeness = recall (nothing critical missing versus ground truth)."},
+    {"front": "Pass rule for quality vs content-safety evaluators", "back": "Quality: 1-5 scale, pass when score >= 3. Content safety: 0-7 severity, pass when score <= 3. Both thresholds default to 3."},
+    {"front": "Evaluators that need ground truth", "back": "Response Completeness, Similarity, F1, BLEU, GLEU, ROUGE, METEOR, and Document Retrieval (relevance labels)."},
+    {"front": "Least-privilege developer role on a Foundry project", "back": "Exam era (Apr 2026): Azure AI User. Docs today (renamed May 2026, same role ID): Foundry User. Contributor has no data actions in either era."},
+    {"front": "Column mapping syntax: cloud evals API vs local `evaluate()`", "back": "Cloud evals API: `{{item.column}}` and `{{sample.output_text}}`. Local `azure-ai-evaluation` SDK: `${data.column}` and `${outputs.column}`."}
+  ],
+  "questions": [
+    {
+      "id": "d2a-01",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You are building a Python service for a Microsoft Foundry project. The service must enumerate the project's connections, start cloud evaluation runs that use the Foundry built-in evaluators, and call a `gpt-5-mini` deployment through the Responses API. Security policy requires Microsoft Entra ID authentication and prohibits API keys. You want to configure the service with a single endpoint. What should you use?",
+      "options": [
+        "`OpenAI` client with `base_url` set to the resource's `/openai/v1/` endpoint and a bearer token provider",
+        "`AIProjectClient` with the project endpoint and `DefaultAzureCredential`, then `get_openai_client()` for model calls",
+        "`AzureOpenAI` client with `azure_endpoint`, a pinned `api_version`, and `azure_ad_token_provider`",
+        "`ChatCompletionsClient` from `azure-ai-inference` with the resource's `/models` endpoint and `DefaultAzureCredential`"
+      ],
+      "answer": [1],
+      "explanation": "The Foundry SDK exposes two clients over one project endpoint: the project client for Foundry-native operations such as listing connections, and the OpenAI-compatible client from `get_openai_client()` for Responses and evaluations. The plain `OpenAI` client on `/openai/v1` is keyless-capable but has no project operations, and the docs say that endpoint does not provide Foundry-specific features such as agents and evaluations. `AzureOpenAI` and the Azure AI Inference `ChatCompletionsClient` target model endpoints only, so neither can enumerate project connections.",
+      "ref": {"title": "Microsoft Foundry SDKs and endpoints", "url": "https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview"},
+      "tags": ["sdk", "endpoints", "entra-id"]
+    },
+    {
+      "id": "d2a-02",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "An ingestion job must create vectors by using a `text-embedding-3-small` deployment in a Microsoft Foundry resource. The job needs no other project features. The job must return one vector for each input chunk, must authenticate without keys, and must not manage `api-version` values. What should you use?",
+      "options": [
+              "`AIProjectClient.get_openai_client()`, then `responses.create` with the embedding deployment name in `model`",
+              "`AzureOpenAI` client with `azure_endpoint`, `api_version`, and `azure_ad_token_provider`, then `embeddings.create`",
+              "`OpenAI` client on the `/openai/v1/` endpoint with a bearer token provider as `api_key`, then `embeddings.create`",
+              "`OpenAI` client on the `/openai/v1/` endpoint with the resource key as `api_key`, then `embeddings.create`"
+      ],
+      "answer": [2],
+      "explanation": "The standard `OpenAI` client on the `/openai/v1` endpoint supports `embeddings.create`, needs no `api-version`, and accepts a Microsoft Entra token provider in `api_key`, so the job stays keyless. `AzureOpenAI` can also create embeddings but requires an `api_version`, the key-based variant breaks the keyless requirement, and the Responses API generates text, not vectors. Current-docs detail, not confirmed for the April 2026 exam era: the SDK overview recommends this endpoint for embeddings and warns that the project endpoint does not currently route embedding requests.",
+      "ref": {"title": "Microsoft Foundry SDKs and endpoints - OpenAI SDK", "url": "https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview"},
+      "tags": ["embeddings", "endpoints", "sdk"]
+    },
+    {
+      "id": "d2a-03",
+      "objective": "2.1",
+      "type": "dropdown",
+      "difficulty": 1,
+      "hot": true,
+      "stem": "You are writing a Python app that connects to a Foundry project named `support-bot` in the Foundry resource `contoso-ai` and calls a model deployment by using the Responses API. Complete the code.",
+      "code": "from azure.ai.projects import AIProjectClient\nfrom azure.identity import DefaultAzureCredential\n\nproject = AIProjectClient(\n    endpoint=\"https://contoso-ai.services.ai.azure.com/[[1]]\",\n    credential=DefaultAzureCredential(),\n)\nopenai = project.[[2]]()\nresponse = openai.responses.create(\n    model=\"gpt-5-mini\",\n    input=\"Summarize the open tickets.\",\n)\nprint(response.[[3]])",
+      "blanks": [
+        {"options": ["openai/v1/", "api/projects/support-bot", "models", "anthropic"], "answer": 1},
+        {"options": ["get_chat_client", "get_responses_client", "get_openai_client", "inference.get_chat_completions_client"], "answer": 2},
+        {"options": ["choices[0].message.content", "output_text", "content[0].text", "result"], "answer": 1}
+      ],
+      "explanation": "The project endpoint has the form `https://YOUR-RESOURCE.services.ai.azure.com/api/projects/YOUR-PROJECT`. `get_openai_client()` returns the OpenAI-compatible client for Responses, and the generated text is in `response.output_text`. `/openai/v1/` is the base URL for the plain `OpenAI` client, `choices[0].message.content` is the Chat Completions shape, and `content[0].text` is the Anthropic Messages shape.",
+      "ref": {"title": "Quickstart: Get started with Microsoft Foundry SDK", "url": "https://learn.microsoft.com/en-us/azure/foundry/quickstarts/get-started-code"},
+      "tags": ["sdk", "responses-api", "python"]
+    },
+    {
+      "id": "d2a-04",
+      "objective": "2.1",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You are migrating an app from the `AzureOpenAI` client to the Azure OpenAI v1 API. The app must not specify an `api-version`, must authenticate by using a managed identity, and must refresh tokens automatically. Complete the code.",
+      "code": "import openai\nfrom azure.identity import DefaultAzureCredential, get_bearer_token_provider\n\ntoken_provider = get_bearer_token_provider(\n    DefaultAzureCredential(), \"https://ai.azure.com/.default\"\n)\nclient = openai.[[1]](\n    base_url=\"https://contoso-ai.openai.azure.com/[[2]]\",\n    [[3]]=token_provider,\n)\nresponse = client.responses.create(model=\"gpt-5-mini\", input=\"Hello\")\nprint(response.output_text)",
+      "blanks": [
+        {"options": ["AzureOpenAI", "AsyncAzureOpenAI", "OpenAI"], "answer": 2},
+        {"options": ["openai/v1/", "openai/deployments/gpt-5-mini/", "api/projects/default/", "models/"], "answer": 0},
+        {"options": ["azure_ad_token_provider", "api_key", "credential", "azure_ad_token"], "answer": 1}
+      ],
+      "explanation": "With the v1 API you use the standard `OpenAI` client, set `base_url` to the resource endpoint with `/openai/v1/` appended, and omit `api-version`; the dated pre-v1 routes are the ones that need an API version. Passing the token provider callable as `api_key` gives automatic token retrieval and refresh, whereas `azure_ad_token_provider` belongs to the `AzureOpenAI` client. Scope note: today's docs and the training module use `https://ai.azure.com/.default`, while older Azure OpenAI samples use `https://cognitiveservices.azure.com/.default`, so accept whichever an exam item offers.",
+      "ref": {"title": "Azure OpenAI in Microsoft Foundry Models v1 API", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle"},
+      "tags": ["entra-id", "keyless", "v1-api", "python"]
+    },
+    {
+      "id": "d2a-05",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 1,
+      "hot": true,
+      "stem": "A chat app calls `client.responses.create` once per user turn. Follow-up questions such as \"And what about last year?\" are answered without any context. You need the service to carry the context forward between turns. The solution must not resend earlier turns from the client and must require the least code. What should you do?",
+      "options": [
+        "Append `response.output` to a list and pass the whole list as `input` on every call",
+        "Set `store=False` and add `reasoning.encrypted_content` to the `include` parameter",
+        "Set `background=True` and call `responses.retrieve` before each new turn",
+        "Pass the `id` of the last response in the `previous_response_id` parameter"
+      ],
+      "answer": [3],
+      "explanation": "The Responses API is stateful: passing the previous response ID in `previous_response_id` chains the new turn to the stored context, so the client sends only the new input. Manually appending `response.output` also works but resends the history on every call. `store=False` makes requests stateless, which is the opposite of the goal, and background mode is for long-running asynchronous tasks.",
+      "ref": {"title": "Use the Azure OpenAI Responses API - Chaining responses together", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses"},
+      "tags": ["responses-api", "state"]
+    },
+    {
+      "id": "d2a-06",
+      "objective": "2.1",
+      "type": "yesno",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "A compliance team requires a chat app that uses a reasoning model to send every Responses API request with `store=False`, so that the service does not persist conversation state. You review the impact on the app design. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "The app can continue a conversation by passing `previous_response_id` from the previous turn.", "answer": false},
+        {"text": "To preserve the model's reasoning context, the app must keep the returned output items, including reasoning items that contain `encrypted_content`, and send them in `input` on the next turn.", "answer": true},
+        {"text": "The app can submit long-running requests by setting `background=True`.", "answer": false}
+      ],
+      "explanation": "The docs say not to use `previous_response_id` for an unstored response; in stateless mode the application supplies the context on every request. Prior messages alone do not carry the model's reasoning, so you replay the returned items, including the encrypted reasoning items, in their original order. Background mode requires `store=true`; stateless requests are not supported.",
+      "ref": {"title": "Use the Azure OpenAI Responses API - Encrypted reasoning", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses"},
+      "tags": ["responses-api", "state", "store"]
+    },
+    {
+      "id": "d2a-07",
+      "objective": "2.1",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You are implementing function calling with the Responses API. The model has returned a response that asks the app to run the local `get_order_status` function. Complete the code that returns the function result to the model.",
+      "code": "tool_outputs = []\nfor item in response.output:\n    if item.type == \"[[1]]\" and item.name == \"get_order_status\":\n        args = json.loads(item.arguments)\n        result = get_order_status(**args)\n        tool_outputs.append({\n            \"type\": \"[[2]]\",\n            \"[[3]]\": item.call_id,\n            \"output\": json.dumps(result),\n        })\n\nfinal = client.responses.create(\n    model=\"gpt-5-mini\",\n    previous_response_id=response.id,\n    input=tool_outputs,\n)\nprint(final.output_text)",
+      "blanks": [
+        {"options": ["tool_calls", "function_call", "tool_use", "function"], "answer": 1},
+        {"options": ["tool", "function_result", "function_call_output", "tool_message"], "answer": 2},
+        {"options": ["tool_call_id", "id", "name", "call_id"], "answer": 3}
+      ],
+      "explanation": "In the Responses API a function request is an output item with `type` equal to `function_call` that carries `name`, `arguments` (a JSON string), and `call_id`. The app runs the function and sends back an item of type `function_call_output` with the same `call_id`. `tool_calls`, the `tool` role, and `tool_call_id` are the Chat Completions equivalents and are not valid here.",
+      "ref": {"title": "Use the Azure OpenAI Responses API - Function calling", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses"},
+      "tags": ["function-calling", "responses-api", "python"]
+    },
+    {
+      "id": "d2a-08",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You are porting an app from `chat.completions.create` to `responses.create`. The existing tool definition is shown. After the port, the request is rejected because the tool definition is invalid. Strict schema adherence for the function arguments must be kept. What should you change?",
+      "code": "{\n  \"type\": \"function\",\n  \"function\": {\n    \"name\": \"get_order_status\",\n    \"description\": \"Look up the status of an order.\",\n    \"strict\": true,\n    \"parameters\": {\n      \"type\": \"object\",\n      \"properties\": { \"order_id\": { \"type\": \"string\" } },\n      \"required\": [\"order_id\"],\n      \"additionalProperties\": false\n    }\n  }\n}",
+      "options": [
+        "Rename `parameters` to `input_schema` and leave the `function` wrapper in place",
+        "Remove `additionalProperties` from `parameters` because strict mode rejects it",
+        "Remove the `function` wrapper and move its properties up, next to `type`",
+        "Replace `\"strict\": true` with `\"parallel_tool_calls\": false` inside the `function` object"
+      ],
+      "answer": [2],
+      "explanation": "Function tools in the Responses API use a flat definition: `type`, `name`, `description`, `parameters`, and `strict` sit at the top level of the tool object. Chat Completions nests the same fields under `function`, which is why the ported definition fails. `additionalProperties: false` is required for strict mode rather than rejected, the schema stays in `parameters`, and `parallel_tool_calls` is a request-level parameter, not part of a tool definition.",
+      "ref": {"title": "Use the Azure OpenAI Responses API - Function calling", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses"},
+      "tags": ["function-calling", "json", "tool-definition"]
+    },
+    {
+      "id": "d2a-09",
+      "objective": "2.1",
+      "type": "dropdown",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You are calling the Responses API through REST to extract invoice data. The output must always conform to a JSON Schema. The `po_number` value might be missing from an invoice, and in that case the model must return `null` for it. Complete the request body.",
+      "code": "{\n  \"model\": \"gpt-5-mini\",\n  \"input\": \"Extract the invoice fields from: ...\",\n  \"[[1]]\": {\n    \"format\": {\n      \"type\": \"[[2]]\",\n      \"name\": \"invoice\",\n      \"schema\": {\n        \"type\": \"object\",\n        \"properties\": { \"vendor\": { \"type\": \"string\" },\n                        \"po_number\": { \"type\": [\"string\", \"null\"] } },\n        \"required\": [[3]],\n        \"additionalProperties\": false\n      },\n      \"strict\": true\n    }\n  }\n}",
+      "blanks": [
+        {"options": ["response_format", "text", "output_format"], "answer": 1},
+        {"options": ["json_object", "json_schema", "structured_output"], "answer": 1},
+        {"options": ["[\"vendor\"]", "[]", "[\"vendor\", \"po_number\"]"], "answer": 2}
+      ],
+      "explanation": "The Responses API takes the schema in `text.format`, with `type` set to `json_schema` and `name`, `schema`, and `strict` as siblings; `response_format` is the Chat Completions parameter. Strict mode requires every field to appear in `required`, so an optional value is modeled with a null union and still listed. `json_object` is JSON mode, which guarantees valid JSON but not adherence to the schema.",
+      "ref": {"title": "Structured outputs", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs"},
+      "tags": ["structured-outputs", "json-schema", "rest"]
+    },
+    {
+      "id": "d2a-10",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A Python service uses the Responses API on the Azure OpenAI v1 endpoint to extract meeting details from email text. You define a Pydantic model named `CalendarEvent`. The model output must be guaranteed to match the schema, and the SDK must return a populated `CalendarEvent` instance without custom JSON parsing code. Which call should you use?",
+      "options": [
+        "`client.responses.create(..., response_format=CalendarEvent)`, then read `response.output_text`",
+        "`client.responses.parse(..., text_format=CalendarEvent)`, then read `response.output_parsed`",
+        "`client.responses.create(..., text={\"format\": {\"type\": \"json_object\"}})`, then call `json.loads`",
+        "`client.beta.chat.completions.parse(..., text_format=CalendarEvent)`, then read `message.parsed`"
+      ],
+      "answer": [1],
+      "explanation": "For the Responses API, `responses.parse` accepts a Pydantic model in `text_format`, converts it to a JSON Schema under `text.format`, and returns the typed object in `output_parsed`. `response_format` is the Chat Completions parameter, and the Chat Completions helper takes `response_format`, not `text_format`. JSON mode (`json_object`) only guarantees syntactically valid JSON and still needs manual parsing.",
+      "ref": {"title": "Structured outputs - Use structured outputs with the Responses API", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs"},
+      "tags": ["structured-outputs", "pydantic", "python"]
+    }
+  ]
+}

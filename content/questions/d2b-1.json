@@ -1,0 +1,383 @@
+{
+  "part": "d2b",
+  "domain": 2,
+  "cheatsheet": [
+    {
+      "title": "Classic agents -> current Foundry Agent Service: what changed",
+      "kind": "table",
+      "columns": ["Concept", "Classic (Assistants-style, azure-ai-projects 1.x)", "Current API (azure-ai-projects 2.x, GA March 2026)"],
+      "rows": [
+        ["Agent definition", "`create_agent()` - removed in SDK 2.0", "`project.agents.create_version(agent_name=..., definition=PromptAgentDefinition(model=..., instructions=..., tools=[...]))` - named agent with immutable versions"],
+        ["History", "Threads + messages", "Conversations + items (messages, tool calls, tool outputs)"],
+        ["Execution", "Runs that you poll", "Responses: `openai_client.responses.create(...)`; your code drives the tool-call loop"],
+        ["Clients", "One agents client", "Project client for agents and versions; OpenAI client from `project.get_openai_client()` for conversations, responses, files, vector stores"],
+        ["Agent reference on a response", "`agent_id` on the run", "Exam era (SDK 2.0.x): `extra_body={\"agent_reference\": {\"name\": agent.name, \"type\": \"agent_reference\"}}` (betas before February 2026 and the Learn training modules use the key `agent`). Docs today: `project.get_openai_client(agent_name=...)`, added in SDK 2.1.0 on April 20, 2026"],
+        ["Agent calls agent", "Connected agents (preview)", "A2A tool - preview in the exam era (`A2APreviewTool`, type `a2a_preview`), GA since August 2026 (`A2ATool`) - or a workflow / Microsoft Agent Framework orchestration"],
+        ["Deep research", "Deep Research tool (preview)", "`o3-deep-research` model + web search tool"],
+        ["Publishing and identity", "-", "Exam era (Apr 2026): unpublished agents share the project's agent identity; publishing creates an Agent Application with its own identity and stable endpoint (reassign RBAC), which you then publish to Teams / Microsoft 365 Copilot with the Shared or Organization scope. Docs today: Agent Applications are legacy; every new agent has its own identity and endpoint; the scopes are labeled Just you / People in your organization"],
+        ["REST", "Thread and run routes", "Create: `POST {project_endpoint}/agents?api-version=v1` with `definition.kind` = `prompt`"]
+      ],
+      "note": "`conversations.create()` on `AIProjectClient` raises AttributeError - conversations and responses live on the OpenAI client. Old threads and runs are not migrated; start new conversations.",
+      "ref": {"title": "Migrate to the new agents developer experience", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/migrate"}
+    },
+    {
+      "title": "Agent types: choose how to build",
+      "kind": "table",
+      "columns": ["Type", "You provide", "Foundry provides", "Pick when"],
+      "rows": [
+        ["Prompt agent", "Model, instructions, tools - in the portal, SDK, or REST", "Managed runtime, versioning, conversations, tracing; no compute to manage", "Fast start; production agents without custom orchestration code"],
+        ["Workflow (preview)", "Visual or YAML sequence of agent, logic, and question nodes with Power Fx", "Designer with templates (sequential, group chat, human in the loop) and version history", "Exam era (Apr 2026): the declarative way to orchestrate several agents with branching and approvals. Docs today: the designer retires December 1, 2026 - move to Microsoft Agent Framework"],
+        ["Hosted agent", "Your own code and framework (Agent Framework, LangGraph, custom) packaged as a container image", "Foundry-managed hosting, scaling, identity, and observability for the container", "Custom orchestration or code that a prompt definition can't express. Exam era: preview. Docs today: GA since July 2026, with per-session sandboxes and Responses / Invocations / Activity / A2A protocols"],
+        ["Responses API without a saved agent", "Model, instructions, and tools sent from your code on each request", "Models, platform tools, project observability - no agent resource", "Agent logic that ships and versions with your application (docs today call this an ephemeral agent)"]
+      ],
+      "note": "The Learn training of the exam era groups agents as declarative (prompt-based agents, and workflow agents defined in YAML) versus hosted (containerized, code-based). Hosted agents can't be added in the workflow designer. Voice-based prompt agents and the Copilot harness appeared after the April 2026 outline.",
+      "ref": {"title": "Agents in Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/overview"}
+    },
+    {
+      "title": "Define a prompt agent with tools (Python)",
+      "kind": "code",
+      "lang": "python",
+      "code": "from azure.identity import DefaultAzureCredential\nfrom azure.ai.projects import AIProjectClient\nfrom azure.ai.projects.models import PromptAgentDefinition, FunctionTool, MCPTool\n\nproject = AIProjectClient(endpoint=PROJECT_ENDPOINT, credential=DefaultAzureCredential())\nfunc = FunctionTool(\n    name=\"get_order\", description=\"Get an order by ID.\", strict=True,\n    parameters={\"type\": \"object\",\n                \"properties\": {\"order_id\": {\"type\": \"string\"}},\n                \"required\": [\"order_id\"], \"additionalProperties\": False})\nmcp = MCPTool(\n    server_label=\"github\", server_url=\"https://api.githubcopilot.com/mcp\",\n    allowed_tools=[\"search_issues\"], require_approval=\"always\",\n    project_connection_id=\"my-mcp-connection\")\nagent = project.agents.create_version(\n    agent_name=\"support-agent\",\n    definition=PromptAgentDefinition(\n        model=\"gpt-5-mini\", instructions=\"Use tools when needed.\", tools=[func, mcp]))",
+      "note": "`create_version` + `PromptAgentDefinition`, never `create_agent`. Function schema: `strict=True` goes with `additionalProperties: False` and a `required` list. MCP: unique `server_label`, remote `server_url`, `allowed_tools` (omitted = all tools; current docs add that `[]` also means all), `require_approval` (default `always`; also `never` or per-tool `always`/`never` lists), credentials through `project_connection_id`.",
+      "ref": {"title": "Use function calling with Microsoft Foundry agents", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/function-calling"}
+    },
+    {
+      "title": "Run it: conversation + tool-call loop (Python)",
+      "kind": "code",
+      "lang": "python",
+      "code": "import json\nopenai_client = project.get_openai_client()\nref = {\"agent_reference\": {\"name\": agent.name, \"type\": \"agent_reference\"}}\nconv = openai_client.conversations.create()\nresp = openai_client.responses.create(\n    conversation=conv.id, input=\"Where is order 1182?\", extra_body=ref)\nreplies = []\nfor item in resp.output:\n    if item.type == \"function_call\":            # your app runs the function\n        result = get_order(**json.loads(item.arguments))\n        replies.append({\"type\": \"function_call_output\",\n                        \"call_id\": item.call_id, \"output\": json.dumps(result)})\n    elif item.type == \"mcp_approval_request\":   # human approval gate\n        replies.append({\"type\": \"mcp_approval_response\",\n                        \"approval_request_id\": item.id, \"approve\": True})\nif replies:\n    resp = openai_client.responses.create(\n        conversation=conv.id, input=replies, extra_body=ref)",
+      "note": "Exam era (SDK 2.0.x): `get_openai_client()` plus `extra_body={\"agent_reference\": ...}`; samples of that era often sent the follow-up with `previous_response_id=response.id`, and the Learn training modules still show the older key `agent`. Docs today: `project.get_openai_client(agent_name=...)` and follow-ups in the same conversation. Return all tool outputs in one call. Function outputs are due within 10 minutes of run creation; non-streaming MCP calls time out at 100 seconds.",
+      "ref": {"title": "Connect agents to Model Context Protocol servers", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/model-context-protocol"}
+    },
+    {
+      "title": "Conversation tracking options",
+      "kind": "table",
+      "columns": ["Option", "How", "Where state lives", "Use when / watch out"],
+      "rows": [
+        ["Conversation", "`conversation=conv.id` on each `responses.create`", "Service: durable items (messages, tool calls, tool outputs)", "Multi-turn and cross-session continuity. The whole conversation is the model input; per the runtime docs it is truncated automatically if it exceeds the context window (the stored conversation itself isn't truncated)"],
+        ["Response chaining", "`previous_response_id=resp.id`", "Service: stored responses (`store` defaults to true)", "Lightweight follow-ups or forking from an earlier response. Needs stored responses"],
+        ["Stateless", "`store=False` and resend earlier items in `input`", "Your application", "Zero-data-retention or full client control. `previous_response_id` has nothing to reference"],
+        ["Long-term memory (preview)", "Memory store + memory search tool", "Managed memory store, partitioned by `scope`", "Preferences and facts recalled in later conversations. Not a transcript"]
+      ],
+      "note": "Docs today: a basic agent setup keeps conversations, items, and responses for 60 days in Microsoft-managed Cosmos DB, then returns 404; a standard setup stores them in your Cosmos DB (`run-state-v1` container, default TTL 60 days, changeable). The 60-day figure isn't confirmed for the April 2026 docs.",
+      "ref": {"title": "Build with agents, conversations, and responses", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/runtime-components"}
+    },
+    {
+      "title": "Tool picker: need -> tool -> gotcha",
+      "kind": "table",
+      "columns": ["Need", "Tool", "Key settings and gotchas"],
+      "rows": [
+        ["Run your own code, or reach systems only your app can reach", "Function calling (`FunctionTool`)", "Executed by your app: `function_call` -> `function_call_output` with `call_id`; outputs due within 10 minutes of run creation; the portal can't add or edit function definitions"],
+        ["Q&A over uploaded files without managing search", "File search (`FileSearchTool`)", "`openai_client.vector_stores.create()` + `files.upload_and_poll()`; 512 MB per file; 10,000 files per vector store; one vector store per agent; hybrid search and reranking built in; a standard setup keeps files in your Storage account and Azure AI Search service"],
+        ["Ground on an existing Azure AI Search index", "Azure AI Search tool (`AzureAISearchTool`)", "`project_connection_id` + `index_name`; `query_type`: `simple`, `semantic`, `vector`, `vector_simple_hybrid` (hybrid vector + keyword), `vector_semantic_hybrid` (hybrid + semantic ranker); `top_k`; optional `filter`; one index per tool; a search service with public access disabled needs a managed identity (keyless) connection and a standard setup with VNet injection. Docs today (Nov 2026) title the page Foundry IQ (Azure AI Search) index"],
+        ["Shared multi-source knowledge with agentic retrieval and permission trimming", "Foundry IQ knowledge base through `MCPTool`", "`server_url` = `{search_endpoint}/knowledgebases/{kb}/mcp?api-version=...`; `allowed_tools=[\"knowledge_base_retrieve\"]`; `RemoteTool` connection with `ProjectManagedIdentity`; the project identity needs Search Index Data Reader on the Azure AI Search service; per-user trimming via `x-ms-query-source-authorization`"],
+        ["Current public web information", "Web search (`WebSearchTool`)", "No Bing resource or connection needed; data leaves the Azure compliance boundary; restrict to chosen public domains with Grounding with Bing Custom Search (preview); the explicit Grounding with Bing Search tool (`bing_grounding`) needs a Bing project connection"],
+        ["Call an existing REST API from its spec", "OpenAPI tool (`OpenApiTool`)", "OpenAPI 3.0/3.1; each operation needs an `operationId` (letters, `-`, `_` only); auth: anonymous, API key held in a project connection (key name must match the spec's security scheme), or managed identity with the API's audience; no OAuth identity passthrough"],
+        ["Tools hosted on a remote MCP server", "MCP tool (`MCPTool`)", "`server_label` (unique per agent), `server_url`, `allowed_tools`, `require_approval`, `project_connection_id`; remote endpoints only (host local servers on Container Apps or Functions); non-streaming calls time out at 100 seconds"],
+        ["Python sandbox for analysis and charts", "Code Interpreter (`CodeInterpreterTool`)", "Extra per-session charge; a session lasts 1 hour with a 30-minute idle timeout; generated files come back as `container_file_citation` annotations"],
+        ["Delegate to another agent in any framework", "A2A tool", "Project connection for the remote A2A endpoint + a tool that references it with `project_connection_id`; replaces classic connected agents. Exam era: preview (`A2APreviewTool`, type `a2a_preview`). Docs today: GA `A2ATool` (August 2026); a Foundry agent target needs incoming A2A enabled and the Foundry Agent Consumer role for the caller"],
+        ["Per-user personalization across sessions", "Memory search tool (preview)", "Needs a memory store and a `scope`; see the memory section"],
+        ["SharePoint content with each user's permissions", "SharePoint tool (preview)", "Identity passthrough (on-behalf-of) with a user identity only; Microsoft 365 Copilot license or pay-as-you-go; one SharePoint tool per agent; same tenant; doesn't work once the agent is published to Teams"],
+        ["Queue-triggered serverless logic", "Azure Functions tool (`AzureFunctionTool`)", "Input and output Storage queue bindings; standard agent setup only; Storage Queue Data Contributor for the project and function app identities; taught in the Learn custom-tools module"],
+        ["A web UI or desktop app with no API", "Browser automation / Computer use", "Browser automation drives a managed Playwright Workspaces browser; Computer use returns `computer_call` actions that YOUR app executes and answers with `computer_call_output` plus a screenshot. Both were preview in the exam era; docs today show them as generally available"],
+        ["Generate images in a conversation", "Image generation tool (preview)", "Needs a `gpt-image-1` deployment plus an orchestrator model in the same project; pass the header `x-ms-oai-image-generation-deployment`"]
+      ],
+      "note": "128 tools per agent; a tool works only when BOTH the model and the region support it; `tool_choice` = `auto`, `required`, or `none`. After the April 2026 outline: Toolbox (one MCP endpoint that bundles tools; preview from April 20, stable July 2026), the Fabric data agent tool deprecated in favor of Fabric IQ (November 2026), and Azure AI Search branded Foundry IQ (November 2026).",
+      "ref": {"title": "Agent tool availability (migration guide)", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/migrate#agent-tool-availability"}
+    },
+    {
+      "title": "Agent memory (preview) essentials",
+      "kind": "bullets",
+      "bullets": [
+        "Long-term memory, not chat history: the service extracts, consolidates, and retrieves facts across conversations. Use a knowledge base for curated organizational content and file search for user-provided documents.",
+        "A memory store needs a chat model deployment and an embedding model deployment: `project.beta.memory_stores.create(name=..., definition=MemoryStoreDefaultDefinition(chat_model=..., embedding_model=..., options=MemoryStoreDefaultOptions(...)))`.",
+        "Exam era (Apr 2026): two memory types - user profile and chat summary (`user_profile_enabled`, `chat_summary_enabled`), tuned with `user_profile_details`. Docs today add procedural memory, a default TTL, and item-level create/update/delete (SDK 2.2.0, May 2026, and later).",
+        "Attach to a prompt agent with `MemorySearchPreviewTool(memory_store_name=..., scope=..., update_delay=...)` (tool type `memory_search_preview`). The tool both reads and writes memories.",
+        "`scope` partitions memories. `{{$userId}}` is resolved per request from the caller's Microsoft Entra identity (tenant ID + object ID); a static scope is shared by everyone who uses it. Docs today also accept an `x-memory-user-id` request header for back ends that call on behalf of users (not confirmed for the exam era).",
+        "`update_delay` debounces writes until the conversation has been inactive; default 300 seconds. The low-level `begin_update_memories(..., update_delay=0)` writes immediately.",
+        "Low-level APIs (`search_memories`, `begin_update_memories`, `delete_scope`) need an explicit `scope`; `delete_scope` removes one user's memories.",
+        "Limits (docs today): 100 scopes per store, 10,000 memories per scope, no virtual network support."
+      ],
+      "note": "A back end that calls with one shared identity puts every customer in the same `{{$userId}}` scope unless it supplies a per-user scope (or, in docs today, the `x-memory-user-id` header).",
+      "ref": {"title": "Create and use memory in Foundry Agent Service (preview)", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/memory-usage"}
+    },
+    {
+      "title": "Multi-agent orchestration picker",
+      "kind": "table",
+      "columns": ["Pattern", "Control flow", "Pick when", "Avoid when"],
+      "rows": [
+        ["Sequential (Agent Framework `SequentialBuilder`; Foundry workflow template)", "Fixed pipeline; each output feeds the next agent", "Step-by-step refinement: draft, review, polish", "Steps can run in parallel or need dynamic routing"],
+        ["Concurrent (`ConcurrentBuilder`)", "Same task fanned out to independent agents; results aggregated", "Parallel analysis, voting, ensemble reasoning", "Agents must build on each other's work, or model quota is tight"],
+        ["Handoff (`HandoffBuilder`)", "Mesh with no orchestrator; the active agent transfers full ownership", "Triage and escalation where the right specialist emerges during the conversation", "The order is known up front, or handoff loops are hard to prevent"],
+        ["Group chat (`GroupChatBuilder`; Foundry workflow template)", "A chat manager picks the next speaker in one shared thread", "Maker-checker loops, debate, human participation", "Simple linear pipelines; more than a few agents"],
+        ["Magentic (`MagenticBuilder`)", "A manager plans, keeps a task ledger, delegates, and replans", "Open-ended problems with no known solution path", "The path is deterministic or speed is the priority"],
+        ["A2A tool (preview in the exam era, GA August 2026)", "The calling agent stays in control and delegates one task to a remote agent", "Cross-framework agent calls; replaces connected agents", "You need a formal multistep workflow"],
+        ["Foundry workflow (preview)", "Declarative nodes: invoke agent, if/else, go to, for each, ask a question; Power Fx with `System.` and `Local.` variables; visual or YAML view", "Exam era (Apr 2026): visual sequential, group chat, or human-in-the-loop flows over Foundry agents; invoke from code by referencing the workflow name like an agent", "Docs today: the designer retires December 1, 2026; exported YAML runs through Agent Framework as a hosted agent"]
+      ],
+      "note": "Handoff vs agent-as-tool: in handoff the receiving agent owns the task; with agent-as-tool the primary agent keeps ownership and gets control back. Foundry doesn't auto-save workflows, and every save creates a new immutable version.",
+      "ref": {"title": "Microsoft Agent Framework workflow orchestrations", "url": "https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/"}
+    },
+    {
+      "title": "Safeguards and approval controls",
+      "kind": "bullets",
+      "bullets": [
+        "MCP `require_approval`: `always` (default), `never`, or per-tool lists (`{\"never\": [...]}` or `{\"always\": [...]}`). A gated call surfaces as `mcp_approval_request`; answer with `mcp_approval_response` (`approval_request_id`, `approve`), continuing the same conversation or response chain.",
+        "Limit the blast radius with `allowed_tools`; when it is omitted, every tool on the server is available.",
+        "Function tools run in your app, so validate arguments and confirm with the user before side effects. Agent Framework tools can require approval (`approval_mode=\"always_require\"` on the tool decorator).",
+        "Foundry workflows (preview): human in the loop = ask a question, wait for input, branch with if/else. Agent Framework Magentic can require human plan review.",
+        "Guardrails on agents (preview): intervention points are user input, tool call, tool response, and output. The agent's guardrail fully overrides the model deployment's guardrail; an agent with none assigned inherits the model deployment's.",
+        "Agents support only the annotate-and-block action; Groundedness and Spotlighting controls don't apply to agents.",
+        "Treat tool descriptions and tool outputs as untrusted input (indirect prompt injection); keep secrets out of prompts, tool outputs, and traces.",
+        "Least privilege for the identity a tool uses (agent identity or project managed identity); keep shared credentials in project connections."
+      ],
+      "note": "Semi-autonomous design = no approval for read-only tools (`never`), approval for write or delete tools (`always`). Tool call and tool response content is scanned only if the agent's guardrail defines controls for those intervention points.",
+      "ref": {"title": "Guardrails and controls overview in Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/guardrails/guardrails-overview"}
+    },
+    {
+      "title": "Trace, monitor, evaluate agents",
+      "kind": "table",
+      "columns": ["Goal", "Use", "Details"],
+      "rows": [
+        ["See every model and tool step without code changes", "Server-side tracing", "Connect Application Insights to the project; automatic for prompt and hosted agents; the Traces tab keeps 90 days; viewers need Log Analytics Reader"],
+        ["Trace your own app code around agent calls", "Client-side tracing (preview)", "Set `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` before `AIProjectInstrumentor().instrument()`; export with `configure_azure_monitor(connection_string=project.telemetry.get_application_insights_connection_string())`"],
+        ["Capture prompts and tool arguments in spans", "Content recording", "Off by default; development only. Exam-era variable: `AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED=true`. Docs today: `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`"],
+        ["Find the failing step", "Span tree", "`invoke_agent` with `execute_tool` child spans; attributes `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result`; search by response ID or trace ID"],
+        ["Operational health", "Agent monitoring dashboard (Monitor tab)", "Token usage, latency, run success rate, evaluation scores, red teaming results"],
+        ["Did it understand the user and follow instructions?", "System evaluators", "Intent Resolution, Task Adherence, Task Completion, Task Navigation Efficiency (needs expected actions)"],
+        ["Did it use tools correctly?", "Process evaluators", "Tool Call Accuracy, Tool Selection, Tool Input Accuracy, Tool Output Utilization, Tool Call Success"],
+        ["Score production traffic as responses complete", "Continuous evaluation rule", "`EvaluationRule` with event type `RESPONSE_COMPLETED` and an agent-name filter (default cap 100 runs per hour); the project managed identity needs Azure AI User (renamed Foundry User later in 2026). Scheduled `TIMER_TRIGGER` rules were added in November 2026"],
+        ["Test an agent before release", "Agent-targeted evaluation", "`evals.runs.create` with data source `azure_ai_target_completions` and target type `azure_ai_agent`; map `{{sample.output_items}}` (includes tool calls) or `{{sample.output_text}}`"]
+      ],
+      "note": "429 `rate_limit_exceeded` = the model deployment is throttling: retry with exponential backoff and jitter. Tool-related evaluators have limited support when the run includes Azure AI Search, Bing, SharePoint, Code Interpreter, Fabric, or web search calls.",
+      "ref": {"title": "Set up tracing in Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-setup"}
+    }
+  ],
+  "triggers": [
+    {"when": "Every call to a remote MCP server must be reviewed by a person", "pick": "`require_approval=\"always\"` (the default) and handle `mcp_approval_request` -> `mcp_approval_response`", "why": "The agent pauses until the approval response item is submitted."},
+    {"when": "The agent may use only some of the tools on an MCP server", "pick": "`allowed_tools` with a list of tool names", "why": "If it is omitted, every tool on the server is exposed."},
+    {"when": "Remember user preferences across sessions and devices", "pick": "Memory store + memory search tool (preview)", "why": "Managed long-term memory is extracted from conversations; a conversation only holds its own history."},
+    {"when": "Memories must be isolated per signed-in user without hard-coding identifiers", "pick": "`scope=\"{{$userId}}\"` on the memory search tool", "why": "Resolved from the caller's Entra identity; docs today also accept an `x-memory-user-id` header for back ends."},
+    {"when": "Keep multi-turn history on the service and resume later", "pick": "A conversation: `conversation=conv.id`", "why": "Durable items are reused across turns and sessions."},
+    {"when": "The service must not store prompts or responses", "pick": "`store=False` and resend the earlier turns in `input`", "why": "Conversations and `previous_response_id` both depend on stored state."},
+    {"when": "Use an existing Azure AI Search index with keyword + vector + semantic ranking", "pick": "Azure AI Search tool with `query_type=\"vector_semantic_hybrid\"`", "why": "Hybrid + semantic ranker against one existing index through a project connection."},
+    {"when": "The Azure AI Search service has public network access disabled", "pick": "Standard agent setup with VNet injection + a managed identity (keyless) search connection", "why": "API-key connections can't reach a search service with public access disabled, and a basic setup can't reach private search."},
+    {"when": "Visual, declarative multi-agent flow that pauses for a person (exam-era workflows)", "pick": "Foundry workflow (preview) with the human-in-the-loop pattern: ask a question, then if/else", "why": "Workflows orchestrate agents with branching and approvals without code; the designer retires December 1, 2026."},
+    {"when": "Call an existing REST API without writing wrapper code", "pick": "OpenAPI tool", "why": "Spec-driven; needs an `operationId` per operation; auth is anonymous, API key connection, or managed identity."},
+    {"when": "Tool logic must run inside your application or on-premises", "pick": "Function calling", "why": "Client-side execution: your app returns `function_call_output`."},
+    {"when": "The right specialist isn't known up front and one agent owns the conversation at a time", "pick": "Handoff orchestration (Agent Framework)", "why": "A mesh of agents transfers full control; there is no manager."},
+    {"when": "Open-ended task where a manager must build and adapt a plan", "pick": "Magentic orchestration (Agent Framework)", "why": "The manager keeps a task ledger and picks the next agent."},
+    {"when": "Bring LangGraph or custom orchestration code but let Foundry host and scale it", "pick": "Hosted agent (containerized; preview in the exam era)", "why": "Prompt agents and workflows are declarative and can't run your framework code."},
+    {"when": "See which model or tool step failed, without changing code", "pick": "Connect Application Insights to the project (server-side tracing)", "why": "Tracing turns on automatically for agents that run in Foundry."},
+    {"when": "Measure whether tool arguments were correct, or whether instructions were followed", "pick": "Tool Input Accuracy / Task Adherence evaluators", "why": "Process evaluators judge tool steps; system evaluators judge the outcome."}
+  ],
+  "lookup": [
+    {"topic": "Agents, conversations, responses (state options, background mode)", "search": "Foundry Agent Service agents conversations responses previous_response_id store", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/runtime-components"},
+    {"topic": "Function calling loop and limits", "search": "function calling Foundry agents function_call_output call_id", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/function-calling"},
+    {"topic": "MCP tool settings and approval flow", "search": "Connect agents to Model Context Protocol servers require_approval allowed_tools", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/model-context-protocol"},
+    {"topic": "Agent memory (stores, scope, update_delay)", "search": "Create and use memory Foundry Agent Service memory search tool scope", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/memory-usage"},
+    {"topic": "Azure AI Search tool parameters and limitations (page now titled Foundry IQ (Azure AI Search) index)", "search": "Azure AI Search tool Foundry agents query_type index_name", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/ai-search"},
+    {"topic": "File search, vector stores, file limits", "search": "File search tool for agents vector store supported file types", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/file-search"},
+    {"topic": "Classic -> new API mapping and tool availability", "search": "Migrate to the new agents developer experience threads conversations", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/migrate"},
+    {"topic": "Orchestration patterns", "search": "Agent Framework workflow orchestrations sequential concurrent handoff group chat magentic", "url": "https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/"},
+    {"topic": "Agent tracing setup", "search": "Set up tracing in Microsoft Foundry Application Insights agents", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-setup"},
+    {"topic": "Agent evaluators", "search": "Agent evaluators tool call accuracy task adherence intent resolution", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/evaluation-evaluators/agent-evaluators"}
+  ],
+  "flashcards": [
+    {"front": "Default value of `require_approval` on an MCP tool?", "back": "`always` - every call surfaces an `mcp_approval_request` until you set `never` or a per-tool list."},
+    {"front": "MCP tool: what happens when `allowed_tools` is omitted?", "back": "The agent can use ALL tools on the server; pass a list of names to restrict. Current docs add that `[]` also means all tools."},
+    {"front": "How do you approve a pending MCP tool call?", "back": "Send an `mcp_approval_response` item with `approval_request_id` (the request item's `id`) and `approve`, continuing the same conversation or chaining with `previous_response_id`."},
+    {"front": "Which item do you send back after running a function tool?", "back": "`function_call_output` with the `call_id` from the `function_call` item and a string `output`."},
+    {"front": "Time limit for returning function tool outputs?", "back": "The run expires 10 minutes after creation (total elapsed time, not per function)."},
+    {"front": "Which client creates conversations and responses for an agent?", "back": "The OpenAI client from `project.get_openai_client()`; reference the agent with `extra_body={\"agent_reference\": {...}}`. The project client manages agents and versions."},
+    {"front": "Classic -> current agent API: what replaced threads, runs, and `create_agent`?", "back": "Conversations, responses, and `project.agents.create_version` with a `PromptAgentDefinition`."},
+    {"front": "Azure AI Search tool: which `query_type` is hybrid + semantic ranker, and which is hybrid without it?", "back": "`vector_semantic_hybrid` vs `vector_simple_hybrid`. The tool targets exactly one index."},
+    {"front": "File search limits per file, per vector store, per agent?", "back": "512 MB per file; 10,000 files per vector store; one vector store per agent (and one per conversation)."},
+    {"front": "Memory tool placeholder for a per-user scope?", "back": "`{{$userId}}` - resolved from the caller's Entra tenant ID + object ID (docs today also read an `x-memory-user-id` header)."},
+    {"front": "Default `update_delay` of the memory search tool?", "back": "300 seconds of inactivity before memories are written."},
+    {"front": "What does a memory store need at creation?", "back": "A chat model deployment and an embedding model deployment."},
+    {"front": "Maximum number of tools registered per agent?", "back": "128. (Docs today also cap an agent at 1,000 versions.)"},
+    {"front": "Replacement for classic connected agents?", "back": "The A2A tool (preview in the exam era, GA since August 2026), a workflow, or a Microsoft Agent Framework orchestration."},
+    {"front": "What turns on server-side agent tracing?", "back": "Connecting an Application Insights resource to the project - no code changes. Log Analytics Reader is needed to view traces."},
+    {"front": "Evaluator for: did the agent follow its system instructions and constraints?", "back": "Task Adherence (preview), a pass/fail system evaluator."},
+    {"front": "An agent and its model deployment both have guardrails. Which applies?", "back": "The agent's guardrail fully overrides the model's. With none assigned, the agent inherits the model deployment's guardrail."},
+    {"front": "Power Fx variable prefixes in Foundry workflows?", "back": "`System.` for system variables (for example `System.LastMessage.Text`) and `Local.` for local variables."}
+  ],
+  "questions": [
+    {
+      "id": "d2b-01",
+      "objective": "2.2",
+      "type": "dropdown",
+      "difficulty": 1,
+      "hot": true,
+      "stem": "You are migrating a support bot from the classic threads-and-runs agent API to the current Foundry Agent Service API by using `azure-ai-projects` 2.x. The agent must be stored as a versioned prompt agent, and multi-turn history must be kept on the service. Complete the Python code.",
+      "code": "project = AIProjectClient(endpoint=ENDPOINT, credential=DefaultAzureCredential())\nagent = project.agents.[[1]](\n    agent_name=\"support-agent\",\n    definition=[[2]](\n        model=\"gpt-5-mini\",\n        instructions=\"You answer product support questions.\",\n        tools=[FileSearchTool(vector_store_ids=[vector_store.id])],\n    ),\n)\nopenai_client = project.get_openai_client()\nconversation = openai_client.[[3]].create()\nresponse = openai_client.responses.create(\n    conversation=conversation.id,\n    input=\"How do I reset my router?\",\n    extra_body={\"agent_reference\": {\"name\": agent.name, \"type\": \"agent_reference\"}},\n)\nprint(response.output_text)",
+      "blanks": [
+        {"options": ["create_agent", "create_version", "create_thread"], "answer": 1},
+        {"options": ["PromptAgentDefinition", "HostedAgentDefinition", "MemoryStoreDefaultDefinition"], "answer": 0},
+        {"options": ["threads", "sessions", "conversations"], "answer": 2}
+      ],
+      "explanation": "`create_agent()` belongs to the classic API and was removed in SDK 2.0; agents are created as immutable versions with `project.agents.create_version()` and a `PromptAgentDefinition` that holds the model, instructions, and tools. Conversations and responses are called on the OpenAI client returned by `project.get_openai_client()`, where conversations replace threads and responses replace runs. `HostedAgentDefinition` describes a containerized agent, not a declarative prompt agent. Since SDK 2.1.0 (April 20, 2026) the docs bind the agent with `get_openai_client(agent_name=...)` instead of `extra_body`.",
+      "ref": {"title": "Quickstart: Create a prompt agent", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/quickstarts/prompt-agent"},
+      "tags": ["python-sdk", "create_version", "conversations", "migration"]
+    },
+    {
+      "id": "d2b-02",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A claims app calls a Foundry prompt agent through the Responses API by using the Python SDK. Compliance requires that the service doesn't persist prompts or responses. The app keeps its own encrypted transcript and must still support multi-turn dialogs. What should you do?",
+      "options": [
+        "Create a conversation and pass its ID in `conversation` on every call",
+        "Pass `previous_response_id` from the prior turn on every call",
+        "Set `store=False` on every call and resend the earlier turns in `input`",
+        "Set `store=False` on every call and pass `previous_response_id`"
+      ],
+      "answer": [2],
+      "explanation": "With `store=False` the service doesn't persist the response, so the application must carry the context forward by passing the earlier items as input on the next request. A conversation is a durable server-side object, and `previous_response_id` works only because responses are stored by default, so it has nothing to reference when `store` is `False`.",
+      "ref": {"title": "Build with agents, conversations, and responses", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/runtime-components"},
+      "tags": ["conversation-tracking", "store", "previous_response_id"]
+    },
+    {
+      "id": "d2b-03",
+      "objective": "2.2",
+      "type": "dropdown",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You create a prompt agent by sending `POST {project_endpoint}/agents?api-version=v1`. The agent needs one custom function that your application executes, and the arguments that the model generates must adhere strictly to the schema. Complete the `definition` object of the request body.",
+      "code": "{\n  \"kind\": \"[[1]]\",\n  \"model\": \"gpt-4.1-mini\",\n  \"instructions\": \"Look up the order before you answer refund questions.\",\n  \"tools\": [{\n    \"type\": \"[[2]]\",\n    \"name\": \"get_order\",\n    \"description\": \"Get an order by its ID.\",\n    \"strict\": true,\n    \"parameters\": {\n      \"type\": \"object\",\n      \"properties\": { \"order_id\": { \"type\": \"string\" } },\n      \"required\": [\"order_id\"],\n      \"[[3]]\": false\n    }\n  }]\n}",
+      "blanks": [
+        {"options": ["hosted", "prompt", "workflow"], "answer": 1},
+        {"options": ["function", "openapi", "mcp"], "answer": 0},
+        {"options": ["nullable", "additional_properties", "additionalProperties"], "answer": 2}
+      ],
+      "explanation": "A declaratively defined agent uses `kind` set to `prompt`; `hosted` is for containerized agents that you deploy as an image. A custom function that your application runs is a tool of `type` `function` with a JSON Schema in `parameters`, whereas `openapi` and `mcp` tools are executed by the service against an API or a remote server. The documented strict sample closes the schema with the JSON Schema keyword `additionalProperties` set to false and lists the properties in `required`.",
+      "ref": {"title": "Use function calling with Microsoft Foundry agents", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/function-calling"},
+      "tags": ["json", "tool-definition", "function-calling", "strict"]
+    },
+    {
+      "id": "d2b-04",
+      "objective": "2.2",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A prompt agent has a `FunctionTool` named `get_order_status`. Your application must run the function locally when the agent requests it and then return the result so that the agent can produce its final answer. The follow-up request is chained to the first response. Complete the Python code.",
+      "code": "agent_ref = {\"agent_reference\": {\"name\": agent.name, \"type\": \"agent_reference\"}}\nresponse = openai_client.responses.create(\n    input=\"Where is order 1182?\", extra_body=agent_ref)\ninput_list = []\nfor item in response.output:\n    if item.type == \"function_call\" and item.name == \"get_order_status\":\n        result = get_order_status(**json.loads(item.[[1]]))\n        input_list.append(FunctionCallOutput(\n            type=\"[[2]]\",\n            [[3]]=item.call_id,\n            output=json.dumps(result),\n        ))\nresponse = openai_client.responses.create(\n    input=input_list,\n    previous_response_id=response.id,\n    extra_body=agent_ref,\n)\nprint(response.output_text)",
+      "blanks": [
+        {"options": ["arguments", "parameters", "input"], "answer": 0},
+        {"options": ["tool_outputs", "function_call_output", "function_result"], "answer": 1},
+        {"options": ["tool_call_id", "id", "call_id"], "answer": 2}
+      ],
+      "explanation": "Function tools run client-side: the response contains a `function_call` item whose `arguments` field is a JSON string. The application executes the function and sends a `function_call_output` item that echoes the `call_id`, before the run expires (10 minutes after creation). `tool_outputs` and `tool_call_id` belong to the classic runs API and Chat Completions, not to the Responses-based agent API. Current doc samples send the follow-up with `conversation=conversation.id` instead of `previous_response_id`; the items are the same.",
+      "ref": {"title": "Use function calling with Microsoft Foundry agents", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/function-calling"},
+      "tags": ["python-sdk", "function-calling", "function_call_output", "call_id"]
+    },
+    {
+      "id": "d2b-05",
+      "objective": "2.2",
+      "type": "order",
+      "difficulty": 1,
+      "hot": true,
+      "stem": "You add a custom `get_inventory` function to a prompt agent by using the Python SDK for the current Foundry Agent Service API. The function must run in your application. You have a list of possible actions, and not all of them are used. Which actions should you perform in sequence?",
+      "items": [
+        "Create an agent version whose definition includes a `FunctionTool` with a JSON Schema for the parameters",
+        "Call `responses.create` with the user's question and a reference to the agent",
+        "Run `get_inventory` locally with the arguments from the `function_call` output item",
+        "Call `responses.create` again with a `function_call_output` item that has the matching `call_id`"
+      ],
+      "distractors": [
+        "Poll the run until its status is `requires_action`, and then call `submit_tool_outputs`",
+        "Upload the function's source file to the agent's Code Interpreter container"
+      ],
+      "explanation": "Function tools are executed by your application: the agent version declares the tool, the first response returns a `function_call` item, your code runs the function, and a second `responses.create` call (in the same conversation or chained with `previous_response_id`) returns a `function_call_output` with the same `call_id`. Polling a run and submitting tool outputs to it is the classic threads-and-runs pattern, and Code Interpreter runs model-written code in a sandbox rather than hosting your function.",
+      "ref": {"title": "Use function calling with Microsoft Foundry agents", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/function-calling"},
+      "tags": ["function-calling", "sequence", "migration"]
+    },
+    {
+      "id": "d2b-06",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A prompt agent has a function tool named `start_export`. When the agent requests the function, your application runs an export that takes about 25 minutes and then submits the result, but the submission fails because the request has expired. The export duration can't be reduced. What should you do?",
+      "options": [
+        "Set `strict` to `true` in the function definition and resubmit the output",
+        "Return a job ID immediately and add a function that checks the job status",
+        "Set `tool_choice` to `required` when you create the first response",
+        "Submit the output by using `previous_response_id` instead of the conversation ID"
+      ],
+      "answer": [1],
+      "explanation": "Function tool outputs must be submitted before the run expires, 10 minutes after it was created, and that limit covers total elapsed time rather than each function. For long operations the guidance is to return a status immediately and poll separately, for example through a second function. `strict` affects schema adherence, `tool_choice` controls whether a tool is called, and changing how context is chained doesn't extend the expiry.",
+      "ref": {"title": "Use function calling with Microsoft Foundry agents", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/function-calling"},
+      "tags": ["function-calling", "limits", "long-running", "error-analysis"]
+    },
+    {
+      "id": "d2b-07",
+      "objective": "2.2",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You add GitHub's remote MCP server to a prompt agent in Foundry Agent Service. The agent must be able to call only two read-only tools, those calls must run without pausing for human review, and the GitHub personal access token must be stored in the Foundry project rather than in the agent definition. Complete the tool definition.",
+      "code": "{\n  \"type\": \"mcp\",\n  \"server_label\": \"github\",\n  \"server_url\": \"https://api.githubcopilot.com/mcp\",\n  \"[[1]]\": [\"search_issues\", \"get_issue\"],\n  \"require_approval\": \"[[2]]\",\n  \"[[3]]\": \"github-pat-connection\"\n}",
+      "blanks": [
+        {"options": ["tools", "allowed_tools", "tool_choice"], "answer": 1},
+        {"options": ["always", "never", "auto"], "answer": 1},
+        {"options": ["authorization", "headers", "project_connection_id"], "answer": 2}
+      ],
+      "explanation": "`allowed_tools` with a list of tool names restricts the agent to those tools; if it is omitted, every tool on the server is available. `require_approval` defaults to `always`, so it must be set to `never` to avoid `mcp_approval_request` pauses. `project_connection_id` points to a project connection that stores the credential (for example a custom key named `Authorization` with the value `Bearer <token>`), so nothing secret is embedded in the definition, unlike an inline header or token.",
+      "ref": {"title": "Connect agents to Model Context Protocol servers", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/model-context-protocol"},
+      "tags": ["json", "mcp", "allowed_tools", "require_approval", "project-connection"]
+    },
+    {
+      "id": "d2b-08",
+      "objective": "2.2",
+      "type": "yesno",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A prompt agent definition includes an MCP tool for a remote server that exposes 12 tools. The tool definition sets only `type`, `server_label`, and `server_url`; it doesn't specify `allowed_tools` or `require_approval`. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "The agent can call any of the 12 tools that the server exposes.", "answer": true},
+        {"text": "Before a tool on the server runs, the response contains an `mcp_approval_request` output item.", "answer": true},
+        {"text": "To let a requested call proceed, the application must create a new conversation and resend the user's prompt.", "answer": false}
+      ],
+      "explanation": "When `allowed_tools` is omitted, the agent can use every tool that the server exposes; a list of names is needed to restrict access. `require_approval` defaults to `always`, so each call first surfaces an `mcp_approval_request` item. The application lets the call proceed by sending an `mcp_approval_response` item (with `approval_request_id` and `approve`) that continues the same exchange, not by starting over.",
+      "ref": {"title": "Connect agents to Model Context Protocol servers", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/model-context-protocol"},
+      "tags": ["mcp", "allowed_tools", "require_approval", "defaults"]
+    },
+    {
+      "id": "d2b-09",
+      "objective": "2.2",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A prompt agent uses an MCP tool that is configured with `require_approval` set to `always`. A human reviewer must see the server, tool name, and arguments before each call runs. You need to submit the reviewer's decision so that the agent can continue. Complete the Python code.",
+      "code": "agent_ref = {\"agent_reference\": {\"name\": agent.name, \"type\": \"agent_reference\"}}\nresponse = openai_client.responses.create(\n    input=\"Close the duplicate tickets for order 1182.\", extra_body=agent_ref)\ninput_list = []\nfor item in response.output:\n    if item.type == \"[[1]]\":\n        ok = reviewer_approves(item.server_label, item.name, item.arguments)\n        input_list.append(McpApprovalResponse(\n            type=\"[[2]]\",\n            approve=ok,\n            [[3]]=item.id,\n        ))\nif input_list:\n    response = openai_client.responses.create(\n        input=input_list,\n        previous_response_id=response.id,\n        extra_body=agent_ref,\n    )",
+      "blanks": [
+        {"options": ["function_call", "mcp_approval_request", "file_search_call"], "answer": 1},
+        {"options": ["function_call_output", "tool_outputs", "mcp_approval_response"], "answer": 2},
+        {"options": ["approval_request_id", "call_id", "tool_call_id"], "answer": 0}
+      ],
+      "explanation": "When approval is required, the response output contains an `mcp_approval_request` item with the server label, tool name, and arguments. You answer with an `mcp_approval_response` item whose `approval_request_id` is the request item's `id` and whose `approve` flag carries the decision. `function_call_output` and `call_id` belong to function calling, and `tool_outputs` comes from the classic runs API. Current doc samples submit the approval with `conversation=conversation.id` rather than `previous_response_id`; the items are the same.",
+      "ref": {"title": "Connect agents to Model Context Protocol servers", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/model-context-protocol"},
+      "tags": ["python-sdk", "mcp", "approval", "human-in-the-loop"]
+    },
+    {
+      "id": "d2b-10",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "An HR team already maintains an Azure AI Search index that has searchable text fields, vector fields, and a semantic configuration. A prompt agent must ground its answers on this index and return citations. Each query must combine keyword and vector retrieval and then apply semantic reranking. You want the least development effort. What should you configure?",
+      "options": [
+        "The Azure AI Search tool with `query_type` set to `vector_semantic_hybrid`",
+        "The Azure AI Search tool with `query_type` set to `vector_simple_hybrid`",
+        "The Azure AI Search tool with `query_type` set to `semantic`",
+        "The file search tool with a new vector store that contains the HR policy files"
+      ],
+      "answer": [0],
+      "explanation": "The Azure AI Search tool queries an existing index through a project connection. `vector_semantic_hybrid` is the hybrid + semantic option: keyword plus vector retrieval followed by semantic reranking. `vector_simple_hybrid` is hybrid (vector + keyword) without the semantic ranker, and `semantic` omits the vector query. File search would re-ingest the documents into a separate vector store, which is more effort and ignores the existing index. Since November 2026 the docs title this tool Foundry IQ (Azure AI Search) index.",
+      "ref": {"title": "Connect a Foundry IQ (Azure AI Search) index to Foundry agents", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/ai-search"},
+      "tags": ["azure-ai-search", "query_type", "hybrid", "semantic-ranking", "tool-selection"]
+    }
+  ]
+}

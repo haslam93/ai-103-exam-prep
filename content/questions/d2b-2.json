@@ -1,0 +1,281 @@
+{
+  "part": "d2b",
+  "domain": 2,
+  "cheatsheet": [],
+  "triggers": [],
+  "lookup": [],
+  "flashcards": [],
+  "questions": [
+    {
+      "id": "d2b-11",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "A prompt agent runs in a standard agent setup with virtual network injection and uses the Azure AI Search tool. The project connection to the search service uses an API key. After the security team disables public network access on the search service and adds a private endpoint, tool calls fail with an \"Unable to connect\" error that reports a DNS failure. Public network access must stay disabled. What should you do?",
+      "options": [
+        "Regenerate the search admin key and update the key in the project connection",
+        "Change the project connection to keyless (managed identity) authentication",
+        "Recreate the agent in a basic agent setup and reuse the connection",
+        "Change the tool's `query_type` from `vector_semantic_hybrid` to `simple`"
+      ],
+      "answer": [1],
+      "explanation": "API-key connections can't reach a search service that has public network access disabled, so the documented fix is to switch the connection to Microsoft Entra managed identity (keyless) authentication and grant that identity Search Index Data Contributor and Search Service Contributor on the search service. A new key doesn't change the unsupported authentication path, and a basic agent setup doesn't support private search resources at all. The same guidance appears in the classic tool docs, so it predates the November 2026 Foundry IQ naming of this page.",
+      "ref": {"title": "Connect a Foundry IQ (Azure AI Search) index to Foundry agents", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/ai-search"},
+      "tags": ["azure-ai-search", "private-networking", "managed-identity", "keyless", "error-analysis"]
+    },
+    {
+      "id": "d2b-12",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You connect a Foundry IQ knowledge base to a prompt agent by adding an `MCPTool` whose `allowed_tools` list contains `knowledge_base_retrieve`. The tool references a `RemoteTool` project connection that authenticates with the project's managed identity and the audience `https://search.azure.com/`. The agent only reads content. Following the principle of least privilege, which role should you assign to the project's managed identity on the Azure AI Search service?",
+      "options": [
+        "Search Service Contributor",
+        "Search Index Data Contributor",
+        "Search Index Data Reader",
+        "Cognitive Services User"
+      ],
+      "answer": [2],
+      "explanation": "For a knowledge base that is consumed over MCP, the project's managed identity needs only Search Index Data Reader for read-only retrieval; Search Index Data Contributor is added only if the agent must write documents to indexes. Cognitive Services User goes in the other direction: it is granted to the search service's identity on the Foundry resource when the knowledge base calls an LLM. Don't confuse this with the index tool (`AzureAISearchTool`), whose keyless setup asks for Search Index Data Contributor plus Search Service Contributor.",
+      "ref": {"title": "Connect a Foundry IQ (Azure AI Search) knowledge base to Foundry Agent Service", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/foundry-iq-connect"},
+      "tags": ["foundry-iq", "knowledge-base", "mcp", "rbac", "least-privilege"]
+    },
+    {
+      "id": "d2b-13",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "A prompt agent has both the file search tool (internal policy documents) and the web search tool attached. For internal policy questions, the agent often answers from public web pages. Both tools must stay available because some questions need current public information. You need the lowest-effort change that makes the agent prefer internal documents for policy questions. What should you do?",
+      "options": [
+        "Set `tool_choice` to `required` on every response that the application creates",
+        "Set `tool_choice` to `none` on responses to internal policy questions",
+        "Replace the web search tool with Grounding with Bing Custom Search",
+        "Add an instruction to use file search before web search for internal content"
+      ],
+      "answer": [3],
+      "explanation": "When tools overlap, the documented practice is to state in the agent instructions what each tool is for and to add a decision rule, such as using file search before web search for internal content. `tool_choice` set to `required` only forces some tool call, so the model can still pick web search, and `none` stops the agent from calling any tool. Bing Custom Search changes which public domains are searched, not the preference for internal documents.",
+      "ref": {"title": "Tool best practices for Microsoft Foundry Agent Service", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/tool-best-practice"},
+      "tags": ["instructions", "tool_choice", "tool-selection"]
+    },
+    {
+      "id": "d2b-14",
+      "objective": "2.2",
+      "type": "dropdown",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "Customers sign in to a web app with Microsoft Entra ID, and the app calls a prompt agent with each signed-in user's token. The agent uses memory (preview) through a memory store named support_memory. Each user's memories must be isolated without hard-coding identifiers, and memories must be written after five minutes of inactivity. Complete the Python code.",
+      "code": "tool = MemorySearchPreviewTool(\n    [[1]]=\"support_memory\",\n    scope=\"[[2]]\",\n    [[3]]=300,\n)\nagent = project.agents.create_version(\n    agent_name=\"support-agent\",\n    definition=PromptAgentDefinition(\n        model=\"gpt-4.1\",\n        instructions=\"Personalize answers by using what you remember.\",\n        tools=[tool],\n    ),\n)",
+      "blanks": [
+        {"options": ["vector_store_ids", "memory_store_name", "index_name"], "answer": 1},
+        {"options": ["{{$userId}}", "{{$conversationId}}", "default"], "answer": 0},
+        {"options": ["top_k", "max_memories", "update_delay"], "answer": 2}
+      ],
+      "explanation": "The memory search tool points at a memory store through `memory_store_name` and partitions memories by `scope`. `{{$userId}}` makes the service resolve the scope from the caller's Microsoft Entra identity (tenant ID and object ID), so each signed-in user gets an isolated scope, whereas a static value such as `default` is shared by everyone. `update_delay` is the period of inactivity, in seconds, before memories are extracted and written (300 is also the default). Docs today additionally accept an `x-memory-user-id` request header for back ends that call with a single identity.",
+      "ref": {"title": "Create and use memory in Foundry Agent Service (preview)", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/memory-usage"},
+      "tags": ["python-sdk", "memory", "scope", "update_delay"]
+    },
+    {
+      "id": "d2b-15",
+      "objective": "2.2",
+      "type": "order",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You are enabling long-term memory (preview) for a prompt agent so that a preference stated in one conversation is recalled in a later conversation. You have a list of possible actions, and not all of them are used. Which actions should you perform in sequence?",
+      "items": [
+        "Create a memory store that references a chat model deployment and an embedding model deployment",
+        "Create an agent version that includes the memory search tool with the memory store name and a scope",
+        "In a conversation, send the preference, and then wait for the configured `update_delay` period of inactivity",
+        "Start a new conversation and ask a related question to confirm that the preference is recalled"
+      ],
+      "distractors": [
+        "Create a vector store and upload the conversation transcript by using `upload_and_poll`",
+        "Call `delete_scope` on the memory store for the user's scope"
+      ],
+      "explanation": "The documented path is to create a memory store (chat model plus embedding model), attach the memory search tool to the agent, send a preference and let the debounce interval (`update_delay`, default 300 seconds) elapse so that memories are extracted and stored, and then confirm recall in a new conversation. Vector stores back the file search tool, not memory, and `delete_scope` removes a user's memories instead of creating them.",
+      "ref": {"title": "Create and use memory in Foundry Agent Service (preview)", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/memory-usage"},
+      "tags": ["memory", "sequence", "update_delay"]
+    },
+    {
+      "id": "d2b-16",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "You build a customer support solution by using Microsoft Agent Framework. A triage agent and billing, shipping, and returns specialists are available. The right specialist isn't known until the customer describes the issue, only one agent may own the conversation at a time, there must be no central manager agent, and a specialist must be able to give the whole conversation back to triage. Which orchestration should you use?",
+      "options": [
+        "Sequential",
+        "Group chat",
+        "Magentic",
+        "Handoff"
+      ],
+      "answer": [3],
+      "explanation": "Handoff connects the agents in a mesh with no orchestrator: the active agent decides when to transfer the whole conversation, and the receiving agent takes full ownership, including handing it back to triage. Group chat and Magentic both rely on a manager that picks the next speaker, and sequential runs the agents in a fixed, predefined order.",
+      "ref": {"title": "Microsoft Agent Framework workflow orchestrations - Handoff", "url": "https://learn.microsoft.com/en-us/agent-framework/workflows/orchestrations/handoff"},
+      "tags": ["multi-agent", "agent-framework", "handoff", "orchestration"]
+    },
+    {
+      "id": "d2b-17",
+      "objective": "2.2",
+      "type": "yesno",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "You are choosing Microsoft Agent Framework orchestration patterns for several multi-agent workloads: a document pipeline in which each step refines the previous result, an open-ended research task, and a customer support triage system. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "Concurrent orchestration is a good fit when each agent must build on the output of the previous agent.", "answer": false},
+        {"text": "In Magentic orchestration, a manager builds and refines a plan (task ledger) and decides which agent acts next.", "answer": true},
+        {"text": "In handoff orchestration, a primary agent keeps ownership of the task and gets control back after each subtask.", "answer": false}
+      ],
+      "explanation": "Concurrent orchestration broadcasts the same task to agents that work independently in parallel; use sequential when each step depends on the previous one. Magentic uses a manager that maintains a task ledger and dynamically selects the next agent for open-ended problems. A primary agent that keeps ownership and gets control back after each subtask is the agent-as-tool pattern; in handoff the receiving agent takes full ownership of the conversation.",
+      "ref": {"title": "Understand agent orchestration (Microsoft Agent Framework)", "url": "https://learn.microsoft.com/en-us/training/modules/orchestrate-semantic-kernel-multi-agent-solution/3-understand-agent-orchestration"},
+      "tags": ["multi-agent", "agent-framework", "concurrent", "magentic", "handoff"]
+    },
+    {
+      "id": "d2b-18",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A Foundry workflow (preview) passes each expense report through an extraction agent and then a policy agent. A manager must explicitly approve every report before the payment agent runs. You want to implement the approval in the workflow designer with the least effort. What should you add before the payment agent?",
+      "options": [
+        "An Ask a question node for the manager's reply, followed by an if/else node",
+        "A group chat pattern in which an approver agent reviews each report",
+        "An MCP tool on the payment agent with `require_approval` set to `always`",
+        "A for each node that reruns the policy agent until the agent approves the report"
+      ],
+      "answer": [0],
+      "explanation": "In a Foundry workflow (preview), human in the loop means asking the user a question, waiting for the input, and then branching with a logic node such as if/else (Power Fx conditions over `Local.` variables). An approver agent in a group chat is still a model, not a human approval, and `require_approval` gates calls to an MCP server rather than pausing the workflow before the payment agent. After the April 2026 outline, Microsoft announced that the workflow designer retires on December 1, 2026 in favor of Microsoft Agent Framework.",
+      "ref": {"title": "Build a workflow in Microsoft Foundry (preview)", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/workflow"},
+      "tags": ["workflows", "human-in-the-loop", "approval", "power-fx"]
+    },
+    {
+      "id": "d2b-19",
+      "objective": "2.2",
+      "type": "multi",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "Agent A is a prompt agent in Foundry Agent Service that uses the current (Responses-based) agent API. It must delegate tax questions to a remote tax agent that another team hosts outside Foundry and exposes through the A2A protocol. The remote endpoint requires an API key, which must not appear in code or in the agent definition. Which two actions should you perform? Each correct answer presents part of the solution.",
+      "options": [
+        "Add the remote agent to agent A as a connected agent",
+        "Create an A2A project connection that stores the endpoint and the API key",
+        "Put the endpoint URL and the API key in agent A's instructions",
+        "Add the A2A tool to agent A and reference the project connection",
+        "Publish the remote agent to Microsoft Teams"
+      ],
+      "answer": [1, 3],
+      "explanation": "The A2A tool lets a Foundry agent call any endpoint that supports the A2A protocol; the endpoint and its credentials are stored in a project connection, and the tool definition references that connection through `project_connection_id`. Connected agents exist only in the classic agent API and aren't available in the current one. Secrets don't belong in instructions, and publishing to Teams is a user channel, not agent-to-agent delegation. In the exam era the tool was in preview (`a2a_preview`); it has been generally available as `a2a` since August 2026.",
+      "ref": {"title": "Connect to an A2A agent endpoint from Foundry Agent Service", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/agent-to-agent"},
+      "tags": ["a2a", "multi-agent", "project-connection", "connected-agents"]
+    },
+    {
+      "id": "d2b-20",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A team built an agent with LangGraph. It relies on custom orchestration code and Python packages that can't be expressed as a model, instructions, and tools definition. The team wants Foundry Agent Service to run the agent on managed infrastructure with built-in observability instead of operating its own cluster. What should you create?",
+      "options": [
+        "A hosted agent that runs the code as a container",
+        "A prompt agent that calls the code through function calling",
+        "A workflow that invokes several prompt agents",
+        "A prompt agent that uses the Code Interpreter tool"
+      ],
+      "answer": [0],
+      "explanation": "Hosted agents are code-based agents (Microsoft Agent Framework, LangGraph, or custom code) that you package as a container and that Foundry Agent Service runs and scales for you. With function calling the code still runs in an application that the team must host, a workflow only orchestrates declaratively defined agents, and Code Interpreter is a sandbox for model-written Python rather than a host for your agent. Hosted agents were in preview in the exam era and became generally available in July 2026, with per-session sandboxes and additional protocols.",
+      "ref": {"title": "What are hosted agents?", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/hosted-agents"},
+      "tags": ["hosted-agents", "agent-types", "langgraph"]
+    },
+    {
+      "id": "d2b-22",
+      "objective": "2.2",
+      "type": "yesno",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "A model deployment uses a guardrail whose Violence control is set to High (the most restrictive setting) for user input and output. A prompt agent that uses the deployment is assigned a custom guardrail whose Violence control is set to Low (the least restrictive setting) for user input and output; it defines no controls for the tool call or tool response intervention points. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "User input that is sent to the agent is scanned for Violence by using the Low setting.", "answer": true},
+        {"text": "Content that a tool returns to the agent is scanned for Violence by using the High setting.", "answer": false},
+        {"text": "If you remove the custom guardrail from the agent, the agent uses the guardrail of its model deployment.", "answer": true}
+      ],
+      "explanation": "A guardrail that is assigned to an agent fully overrides the guardrail of the underlying model deployment, so user input and output are scanned with the Low setting. Tool call and tool response (preview) are separate intervention points; because the agent's guardrail has no controls there, that content isn't scanned for Violence at all. An agent without its own guardrail inherits the guardrail of its model deployment.",
+      "ref": {"title": "Guardrails and controls overview in Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/guardrails/guardrails-overview"},
+      "tags": ["guardrails", "intervention-points", "safeguards", "content-safety"]
+    },
+    {
+      "id": "d2b-23",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "You tested a prompt agent in Microsoft Foundry and publish it to Microsoft Teams and Microsoft 365 Copilot from the Foundry portal. Every user in your tenant must be able to find the agent in the agent store under Built by your org. Which configuration is required?",
+      "options": [
+        "Publish with the shared (individual) scope, and then send the agent link to all users",
+        "Publish with the shared (individual) scope, and then have a Foundry project owner approve it",
+        "Publish with the organization scope, and then have a Microsoft 365 admin approve the request",
+        "Publish with the organization scope; the agent is then listed for everyone without approval"
+      ],
+      "answer": [2],
+      "explanation": "The organization scope submits the agent for approval in the Microsoft 365 admin center; after approval it appears under Built by your org for all tenant users. The shared scope (called individual scope, or Just you, in today's portal) needs no approval but lists the agent only under Your agents for the publisher, who can share a link. Foundry roles don't approve Microsoft 365 agent submissions. In the exam era you first published the agent as an Agent Application; today the portal publishes the agent's own endpoint and labels the organization scope People in your organization.",
+      "ref": {"title": "Publish agents to Microsoft Copilot and Microsoft Teams", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/publish-copilot"},
+      "tags": ["publishing", "teams", "microsoft-365-copilot", "scope"]
+    },
+    {
+      "id": "d2b-24",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 1,
+      "hot": true,
+      "stem": "A prompt agent in production intermittently returns wrong order totals. For a given response ID, you need to inspect every model call and tool invocation, including inputs, outputs, and latency, in the Foundry portal. The project has no observability configured, and you must not change application code. What should you do first?",
+      "options": [
+        "Call `AIProjectInstrumentor().instrument()` in the application and redeploy it",
+        "Connect an Application Insights resource to the Foundry project",
+        "Create a continuous evaluation rule that targets the agent",
+        "Enable content recording for traces in the application's environment settings"
+      ],
+      "answer": [1],
+      "explanation": "Server-side tracing for agents that run in Foundry turns on automatically once an Application Insights resource is connected to the project, with no code changes; traces can then be searched by response ID or trace ID on the Traces tab (viewers need Log Analytics Reader). `AIProjectInstrumentor` and content recording are client-side instrumentation that require code or configuration changes. Continuous evaluation scores responses and itself depends on the Application Insights connection.",
+      "ref": {"title": "Set up tracing in Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-setup"},
+      "tags": ["tracing", "application-insights", "monitoring", "error-analysis"]
+    },
+    {
+      "id": "d2b-25",
+      "objective": "2.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "Traces for a refund agent show that it picks the correct tool, `create_refund`, but often passes a wrong `currency` value and omits `order_id`. You need a built-in agent evaluator that isolates whether tool-call parameters are correct, checking criteria such as type compliance, required parameters, and unexpected parameters. Which evaluator should you use?",
+      "options": [
+        "Tool Selection",
+        "Tool Call Success",
+        "Tool Input Accuracy",
+        "Tool Output Utilization"
+      ],
+      "answer": [2],
+      "explanation": "Tool Input Accuracy validates tool-call parameters against six strict criteria: groundedness, type compliance, format compliance, required parameters, no unexpected parameters, and value appropriateness. Tool Selection checks only whether the right tools were chosen, Tool Call Success detects technical failures such as exceptions or timeouts, and Tool Output Utilization checks how the agent used the tool results.",
+      "ref": {"title": "Agent evaluators", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/evaluation-evaluators/agent-evaluators"},
+      "tags": ["evaluation", "agent-evaluators", "tool-input-accuracy", "error-analysis"]
+    },
+    {
+      "id": "d2b-26",
+      "objective": "2.2",
+      "type": "multi",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "A prompt agent serves production traffic. You must automatically score its responses as each response completes and show the scores in the agent's monitoring dashboard in the Foundry portal. Which three actions should you perform? Each correct answer presents part of the solution.",
+      "options": [
+        "Schedule a nightly batch evaluation run against a fixed test dataset",
+        "Connect an Application Insights resource to the Foundry project",
+        "Assign the Azure AI User role to the project's managed identity",
+        "Run an agent-targeted evaluation from the CI/CD pipeline before each release",
+        "Create an evaluation rule that uses the `RESPONSE_COMPLETED` event type and filters on the agent name",
+        "Enable content recording in the client application"
+      ],
+      "answer": [1, 2, 4],
+      "explanation": "Continuous evaluation is an evaluation rule whose event type is `RESPONSE_COMPLETED`, with an `EvaluationRuleFilter` for the agent and a `ContinuousEvaluationRuleAction` (default cap of 100 runs per hour). It requires Application Insights to be connected to the project and the Azure AI User role (renamed Foundry User later in 2026) on the project's managed identity. Batch runs against a dataset, whether nightly or in a pipeline, test fixed queries rather than each production response, and content recording only affects what traces capture.",
+      "ref": {"title": "Set up continuous and scheduled evaluation", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/continuous-scheduled-evaluation"},
+      "tags": ["continuous-evaluation", "monitoring", "application-insights", "evaluation-rules"]
+    }
+  ]
+}

@@ -1,0 +1,288 @@
+{
+  "part": "d2a",
+  "domain": 2,
+  "cheatsheet": [],
+  "triggers": [],
+  "lookup": [],
+  "flashcards": [],
+  "questions": [
+    {
+      "id": "d2a-11",
+      "objective": "2.1",
+      "type": "multi",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You plan to use the following JSON Schema for structured outputs with `strict` set to `true`. The `notes` value is optional in the source documents. The request fails schema validation. Which two changes should you make? Each correct answer presents part of the solution.",
+      "code": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"customer\": { \"type\": \"string\" },\n    \"priority\": { \"type\": \"string\", \"enum\": [\"low\", \"high\"] },\n    \"notes\": { \"type\": \"string\" }\n  },\n  \"required\": [\"customer\", \"priority\"]\n}",
+      "options": [
+        "Add `\"additionalProperties\": false` to the object",
+        "Remove the `enum` keyword from the `priority` property",
+        "Add `notes` to `required` and change its type to `[\"string\", \"null\"]`",
+        "Wrap the root object in `anyOf` with a variant that omits `notes`",
+        "Add `\"minLength\": 0` to `notes` so that an empty string is accepted"
+      ],
+      "answer": [0, 2],
+      "explanation": "Strict structured outputs require every object to set `additionalProperties` to `false` and every property to be listed in `required`; an optional value is emulated with a null union type. `enum` is a supported type, so removing it is unnecessary. The root object cannot be `anyOf`, and `minLength` is one of the unsupported string keywords.",
+      "ref": {"title": "Structured outputs - JSON Schema support and limitations", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs"},
+      "tags": ["structured-outputs", "json-schema", "strict"]
+    },
+    {
+      "id": "d2a-12",
+      "objective": "2.1",
+      "type": "dropdown",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "An insurance app sends a photo that is stored on local disk, together with a text prompt, to a vision-enabled model by using the Responses API. The photo is not reachable through a public URL. Complete the code.",
+      "code": "with open(\"claim.jpg\", \"rb\") as f:\n    b64 = base64.b64encode(f.read()).decode(\"utf-8\")\n\nresponse = client.responses.create(\n    model=\"gpt-5-mini\",\n    input=[{\n        \"role\": \"user\",\n        \"content\": [\n            {\"type\": \"[[1]]\", \"text\": \"Describe the damage.\"},\n            {\"type\": \"[[2]]\",\n             \"[[3]]\": f\"data:image/jpeg;base64,{b64}\"},\n        ],\n    }],\n)\nprint(response.output_text)",
+      "blanks": [
+        {"options": ["text", "input_text", "output_text"], "answer": 1},
+        {"options": ["image_url", "input_image", "input_file"], "answer": 1},
+        {"options": ["file_id", "file_data", "image_url"], "answer": 2}
+      ],
+      "explanation": "Responses API user content uses `input_text` and `input_image` parts. An image that is not publicly hosted is sent inline as a base64 data URI in the `image_url` property of the `input_image` part. `file_id` references an image uploaded through the Files API, `input_file` with `file_data` is the PDF pattern, and `text` / `image_url` as part types are Chat Completions shapes.",
+      "ref": {"title": "Use the Azure OpenAI Responses API - Image input", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses"},
+      "tags": ["multimodal", "vision", "responses-api", "python"]
+    },
+    {
+      "id": "d2a-13",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A code-review assistant calls `client.chat.completions.create` on the Azure OpenAI v1 endpoint with a `gpt-5-mini` deployment. To improve code generation, you deploy `gpt-5.3-codex` and change only the `model` value in the app. Every request now fails. The deployment shows a provisioning state of Succeeded, and other apps can use it. What should you do?",
+      "options": [
+        "Change the app to call the model by using `client.responses.create`",
+        "Replace `max_tokens` with `max_completion_tokens` in the existing request",
+        "Switch to the `AzureOpenAI` client and specify the latest preview `api_version`",
+        "Redeploy the model by using the Data Zone Standard deployment type"
+      ],
+      "answer": [0],
+      "explanation": "The API support table for reasoning models shows that the codex models (`gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.1-codex` variants, `gpt-5-codex`) are available on the Responses API but not on the Chat Completions API. `max_completion_tokens` is the correct token cap for reasoning models that do support Chat Completions, but it does not make this model available there; with Responses you use `max_output_tokens`. The client class, API version, and deployment type do not change which API a model supports.",
+      "ref": {"title": "Azure OpenAI reasoning models - API and feature support", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"},
+      "tags": ["code-models", "codex", "responses-api"]
+    },
+    {
+      "id": "d2a-14",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A team has Python code that calls OpenAI-hosted models by using the `OpenAI` client and `chat.completions.create`. You must point the same code at a `DeepSeek-V3.1` deployment in a Microsoft Foundry resource. The solution must use Microsoft Entra ID authentication, must not require an `api-version` value, and must minimize code changes. What should you use?",
+      "options": [
+              "`AnthropicFoundry` client with the resource's `/anthropic` endpoint and a bearer token provider",
+              "`AzureOpenAI` client with `azure_endpoint`, a pinned `api_version`, and `azure_ad_token_provider`",
+              "`ChatCompletionsClient` from `azure-ai-inference` with the `/models` endpoint and `DefaultAzureCredential`",
+              "`OpenAI` client with `base_url` set to the `/openai/v1/` endpoint and a token provider as `api_key`"
+      ],
+      "answer": [3],
+            "explanation": "The Azure OpenAI v1 API lets the standard `OpenAI` client target a Foundry resource: set `base_url` to the endpoint with `/openai/v1/` appended and pass a Microsoft Entra token provider as `api_key`. No `api-version` is needed, and chat completions work for Foundry Models from providers such as DeepSeek and Grok with the deployment name in `model`. `AzureOpenAI` requires an API version, and the `/anthropic` endpoint with the Anthropic SDK is only for Claude deployments. The Azure AI Inference client is a different SDK, so the existing calls would have to be rewritten; that SDK was also retired on August 26, 2026, after the exam outline was frozen.",
+            "ref": {"title": "Azure OpenAI in Microsoft Foundry Models v1 API", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle"},
+            "tags": ["foundry-models", "sdk", "v1-api"]
+    },
+    {
+      "id": "d2a-15",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You are designing a new HR assistant. Employees ask multi-part, conversational questions whose answers are spread across       a SharePoint site, an Azure Blob Storage container, and an existing Azure AI Search index. The retrieval layer must use an LLM to plan focused subqueries and run them in parallel across all three sources, enforce user permissions, and return grounding data with citations through a single endpoint. What should you use?",
+      "options": [
+        "A `file_search` tool that is attached to one vector store",
+              "An Azure AI Search knowledge base that uses agentic retrieval",
+        "A classic RAG pattern that sends one hybrid query to the index",
+              "A chat model that is fine-tuned on the exported HR documents"
+      ],
+      "answer": [1],
+            "explanation": "A knowledge base in Azure AI Search unifies several knowledge sources (indexed or remote, such as SharePoint, Blob Storage, and search indexes) behind one retrieve endpoint, and agentic retrieval uses an LLM to decompose the question into parallel subqueries, reranks semantically, and returns permission-aware grounding data with citations; agents reach it through Foundry IQ. Classic RAG sends a single query to one index with no LLM query planning, and `file_search` only covers files uploaded to a vector store. Fine-tuning changes model behavior rather than adding retrievable, permission-trimmed knowledge with citations. Era note: in April 2026 knowledge bases were generally available while query planning and answer synthesis were still preview, and since November 2026 Learn titles the whole service Foundry IQ (Azure AI Search).",
+      "ref": {"title": "Retrieval-augmented generation (RAG) in Foundry IQ (Azure AI Search)", "url": "https://learn.microsoft.com/en-us/azure/search/retrieval-augmented-generation-overview"},
+      "tags": ["rag", "foundry-iq", "agentic-retrieval"]
+    },
+    {
+      "id": "d2a-16",
+      "objective": "2.1",
+      "type": "order",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You need to run a cloud evaluation that scores the groundedness of precomputed RAG responses by using the Foundry SDK for Python. The test data is already uploaded to the project as a JSONL dataset, and you have its ID. Which actions should you perform in sequence? Not all actions are used.",
+      "items": [
+        "Create an `AIProjectClient` with the project endpoint and `DefaultAzureCredential`, and call `get_openai_client()`",
+        "Call `evals.create` with a `data_source_config` and `testing_criteria` that reference `builtin.groundedness`",
+        "Call `evals.runs.create` with the evaluation ID and a `jsonl` data source that references the dataset ID",
+        "Poll `evals.runs.retrieve` until the run status is `completed`",
+        "Call `evals.runs.output_items.list` to read the per-row scores"
+      ],
+      "distractors": [
+        "Call `evaluate()` from `azure.ai.evaluation` with an `evaluator_config` column mapping",
+        "Call `responses.create` with `background=True` for each row of the dataset"
+      ],
+      "explanation": "Cloud evaluation uses the OpenAI-compatible evals API on the project endpoint: get the client, define the evaluation (data schema plus testing criteria), start a run that points at the dataset, poll the asynchronous run, then read the output items. `evaluate()` belongs to the local `azure-ai-evaluation` SDK and runs the evaluators on your own machine, so it is not part of a cloud evaluation run. Generating responses row by row is unnecessary because the responses are precomputed.",
+      "ref": {"title": "Evaluate existing datasets with Microsoft Foundry SDK", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/cloud-evaluation-datasets"},
+      "tags": ["evaluation", "groundedness", "sdk"]
+    },
+    {
+      "id": "d2a-17",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A research app sends complex prompts to an `o3` deployment through the Responses API. Requests often run for several minutes and are dropped by an intermediate gateway that closes HTTP connections after 60 seconds. Users must be able to close the browser and return later for the result, and they must be able to cancel a running job. What should you do?",
+      "options": [
+        "Set `background=True`, save the response `id`, and poll `responses.retrieve`",
+        "Set `stream=True` and render `response.output_text.delta` events as they arrive",
+        "Set `store=False` and resend the conversation items when the client reconnects",
+        "Move the deployment to Global Batch and submit each prompt in a batch input file"
+      ],
+      "answer": [0],
+      "explanation": "Background mode queues the request and returns immediately with a response ID and a `queued` status; the app polls `responses.retrieve` while the status is `queued` or `in_progress` and can stop the task with `responses.cancel`. Streaming alone still depends on a live connection. `store=False` is incompatible because background mode requires stored responses. Global Batch is a file-based deployment type with a 24-hour target turnaround, not an interactive poll-and-cancel mechanism.",
+      "ref": {"title": "Use the Azure OpenAI Responses API - Background tasks", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses"},
+      "tags": ["responses-api", "background", "long-running"]
+    },
+    {
+      "id": "d2a-18",
+      "objective": "2.1",
+      "type": "yesno",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You run a cloud evaluation on the outputs of a RAG app by using the built-in groundedness and violence evaluators. Both evaluators use their default thresholds. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "A row that receives a groundedness score of 3 is labeled as pass.", "answer": true},
+        {"text": "A row that receives a violence severity score of 4 is labeled as pass.", "answer": false},
+        {"text": "The violence evaluator must be configured with a judge model deployment in `initialization_parameters`.", "answer": false}
+      ],
+      "explanation": "Groundedness returns a 1-5 score with a default threshold of 3, and scores at or above the threshold pass. Content-safety evaluators use a 0-7 severity scale with a default threshold of 3 and pass only when the score is less than or equal to the threshold, so a severity of 4 fails. Risk and safety evaluators run on the hosted Foundry evaluation service and do not take a judge deployment.",
+      "ref": {"title": "Risk and safety evaluators", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/evaluation-evaluators/risk-safety-evaluators"},
+      "tags": ["evaluation", "groundedness", "content-safety", "thresholds"]
+    },
+    {
+      "id": "d2a-19",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You evaluate a RAG chatbot. Each test row contains `query`, `context`, and `response`. Auditors require a strict true/false verdict on whether each response is consistent with the retrieved context. The verdict must be produced by the Azure AI Content Safety service instead of a GPT judge deployment that your team manages. Which evaluator should you use?",
+      "options": [
+        "Groundedness",
+        "Relevance",
+        "Response Completeness (preview)",
+        "Groundedness Pro (preview)"
+      ],
+      "answer": [3],
+      "explanation": "Groundedness Pro (preview) detects whether the response is strictly consistent with the context by using the Azure AI Content Safety service, needs no model deployment, and returns a binary result. The standard Groundedness evaluator measures the same idea but uses your own GPT deployment as the judge and returns a 1-5 score. Relevance compares the response with the query, and Response Completeness requires ground truth.",
+      "ref": {"title": "Retrieval-Augmented Generation (RAG) evaluators", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/evaluation-evaluators/rag-evaluators"},
+      "tags": ["evaluation", "groundedness", "hallucination"]
+    },
+    {
+      "id": "d2a-20",
+      "objective": "2.1",
+      "type": "multi",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You have a JSONL test dataset in which each row contains only `query`, `context`, and `response` fields. No human-authored reference answers or relevance labels exist. Which three built-in evaluators can you run against this dataset? Each correct answer presents a complete solution.",
+      "options": [
+        "Groundedness",
+        "Response Completeness (preview)",
+        "Retrieval",
+        "F1 Score",
+        "Relevance",
+        "Document Retrieval"
+      ],
+      "answer": [0, 2, 4],
+      "explanation": "Groundedness needs `response` and `context`, Relevance needs `query` and `response`, and Retrieval needs `query` and `context`, so all three run without ground truth. Response Completeness and F1 Score compare the response with `ground_truth`, and Document Retrieval needs `retrieval_ground_truth` relevance labels plus the retrieved documents.",
+      "ref": {"title": "Retrieval-Augmented Generation (RAG) evaluators - Using RAG evaluators", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/evaluation-evaluators/rag-evaluators"},
+      "tags": ["evaluation", "rag", "ground-truth"]
+    },
+    {
+      "id": "d2a-21",
+      "objective": "2.1",
+      "type": "dropdown",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You are configuring a cloud evaluation in a Foundry project to detect fabricated content in the answers of a RAG app. Each row of the uploaded JSONL dataset has `query`, `context`, and `response` fields. Complete the testing criteria.",
+      "code": "testing_criteria = [\n    {\n        \"type\": \"[[1]]\",\n        \"name\": \"fabrication-check\",\n        \"evaluator_name\": \"[[2]]\",\n        \"initialization_parameters\": {\"deployment_name\": judge_model},\n        \"data_mapping\": {\n            \"context\": \"[[3]]\",\n            \"response\": \"{{item.response}}\",\n        },\n    }\n]\neval_object = openai_client.evals.create(\n    name=\"rag-eval\",\n    data_source_config=data_source_config,\n    testing_criteria=testing_criteria,\n)",
+      "blanks": [
+        {"options": ["score_model", "azure_ai_evaluator", "label_model", "string_check"], "answer": 1},
+        {"options": ["builtin.retrieval", "builtin.groundedness", "builtin.coherence", "GroundednessEvaluator"], "answer": 1},
+        {"options": ["${data.context}", "{{sample.output_text}}", "{{item.context}}"], "answer": 2}
+      ],
+      "explanation": "Built-in evaluators are configured as testing criteria of type `azure_ai_evaluator` with an `evaluator_name` such as `builtin.groundedness`, which checks that the response does not fabricate content beyond the supplied context. Dataset fields are referenced with `{{item.field_name}}`; `{{sample.output_text}}` refers to text generated by a model target at run time, and `${data.context}` is the column-mapping syntax of the local `evaluate()` API in the `azure-ai-evaluation` SDK. `score_model`, `label_model`, and `string_check` are Azure OpenAI grader types that take a prompt or reference instead of `evaluator_name`.",
+      "ref": {"title": "Retrieval-Augmented Generation (RAG) evaluators - Configuration example", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/evaluation-evaluators/rag-evaluators"},
+      "tags": ["evaluation", "groundedness", "python", "evals-api"]
+    },
+    {
+      "id": "d2a-22",
+      "objective": "2.1",
+      "type": "multi",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "You are building a financial assistant by using the Responses API. The model must be able to compute exact totals and create a chart from a CSV file that the user uploads, and it must be able to base answers on this week's public market announcements. You do not want to write or host any calculation or retrieval code. Which two tools should you add to the `tools` array? Each correct answer presents part of the solution.",
+      "options": [
+        "`function`",
+        "`code_interpreter`",
+        "`file_search`",
+        "`web_search`",
+        "`image_generation`"
+      ],
+      "answer": [1, 3],
+      "explanation": "`code_interpreter` gives the model a sandboxed Python runtime to analyze data files, perform calculations, and generate files such as charts. `web_search` lets it retrieve current public information at run time. A `function` tool would require you to implement and run the logic yourself, `file_search` retrieves relevant passages from a vector store rather than computing over tabular data, and `image_generation` creates images from prompts, not charts from data.",
+      "ref": {"title": "Develop generative AI apps that use tools - What are tools?", "url": "https://learn.microsoft.com/en-us/training/modules/use-generative-ai-tools/02-what-are-tools"},
+      "tags": ["tools", "code-interpreter", "web-search"]
+    },
+    {
+      "id": "d2a-23",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A developer has the Contributor role on the resource group that contains a Foundry resource and its project. The developer runs code that uses `AIProjectClient` with `DefaultAzureCredential` to call a model deployment and start a cloud evaluation run, but the data-plane calls are denied. You need to grant the required access by following the principle of least privilege. Which role should you assign to the developer on the project?",
+      "options": [
+        "Azure AI User",
+        "Azure AI Project Manager",
+        "Azure AI Account Owner",
+        "Azure AI Developer"
+      ],
+      "answer": [0],
+      "explanation": "Contributor is a control-plane role with no data actions, so it cannot build or run workloads in a project. Azure AI User grants the project data actions and is the least-privilege role for developers; it is also the documented prerequisite for cloud evaluations. Azure AI Project Manager adds management and role-assignment rights, Azure AI Account Owner manages resources but has no data actions, and Azure AI Developer is scoped to Azure Machine Learning workspaces and hubs rather than Foundry projects. Since May 2026 Learn shows these roles as Foundry User, Foundry Project Manager, and Foundry Account Owner (same role IDs); Azure AI Developer kept its name.",
+      "ref": {"title": "Role-based access control for Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/concepts/rbac-foundry"},
+      "tags": ["rbac", "least-privilege", "project-connection"]
+    },
+    {
+      "id": "d2a-24",
+      "objective": "2.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "You deploy a chat model for an EU customer. Prompts and responses must be processed only within the EU. Traffic is bursty and unpredictable, so you need pay-per-token billing, and you want a higher default quota than a geography-based deployment provides. Which deployment type should you choose?",
+      "options": [
+        "Global Standard",
+        "Standard",
+        "Data Zone Standard",
+        "Data Zone Provisioned"
+      ],
+      "answer": [2],
+      "explanation": "Data Zone Standard routes traffic only within the Microsoft-defined data zone (EU, US, or APAC), bills per token, and offers higher default quotas than geography-based deployment types. Global Standard has the highest quota but can process requests in any Azure region. Regional Standard keeps processing in one geography but with more limited quota, and Data Zone Provisioned uses reserved provisioned throughput units instead of pay-per-token billing.",
+      "ref": {"title": "Deployment types for Microsoft Foundry Models", "url": "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types"},
+      "tags": ["deployment-types", "data-residency"]
+    },
+    {
+      "id": "d2a-25",
+      "objective": "2.1",
+      "type": "order",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "You need to ground a model on a set of policy PDF files by using the `file_search` tool of the Responses API. You do not want to manage a search service. Which actions should you perform in sequence? Not all actions are used.",
+      "items": [
+        "Create a vector store by calling `vector_stores.create`",
+        "Add the PDF files to the vector store by calling `vector_stores.files.upload_and_poll`",
+        "Call `responses.create` with a `file_search` tool that lists the vector store ID in `vector_store_ids`",
+        "Read `output_text` from the response"
+      ],
+      "distractors": [
+        "Call `embeddings.create` for each document chunk and store the vectors",
+        "Create a search index that has a vector field and a semantic configuration"
+      ],
+      "explanation": "File search works on vector stores: create the store, upload files (the upload-and-poll helper waits until processing completes), then pass the store ID to the `file_search` tool on the request. When a file is added, the service automatically parses, chunks, and embeds it, so you neither call the embeddings API nor build a search index. Add `include=[\"file_search_call.results\"]` when you want the retrieved passages returned for troubleshooting.",
+      "ref": {"title": "Develop generative AI apps that use tools - Use the file_search tool", "url": "https://learn.microsoft.com/en-us/training/modules/use-generative-ai-tools/05-file-search"},
+      "tags": ["rag", "file-search", "vector-store"]
+    }
+  ]
+}

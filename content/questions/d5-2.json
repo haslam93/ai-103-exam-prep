@@ -1,0 +1,246 @@
+{
+  "part": "d5",
+  "domain": 5,
+  "cheatsheet": [],
+  "triggers": [],
+  "lookup": [],
+  "flashcards": [],
+  "questions": [
+    {
+      "id": "d5-14",
+      "objective": "5.2",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "You are preparing scanned reports for a RAG pipeline by using Azure Document Intelligence (API version `2024-11-30`). The output must be Markdown that preserves section headings and tables. Complete the Python code.",
+      "code": "client = DocumentIntelligenceClient(\n    endpoint=endpoint, credential=AzureKeyCredential(key)\n)\npoller = client.[[1]](\n    \"[[2]]\",\n    AnalyzeDocumentRequest(url_source=doc_url),\n    [[3]]=\"markdown\",\n)\nresult = poller.result()\nprint(result.content)",
+      "blanks": [
+        {"options": ["begin_analyze", "analyze_document", "begin_analyze_document", "begin_recognize_content"], "answer": 2},
+        {"options": ["prebuilt-read", "prebuilt-layout", "prebuilt-document", "prebuilt-documentSearch"], "answer": 1},
+        {"options": ["features", "output", "output_content_format", "string_index_type"], "answer": 2}
+      ],
+      "explanation": "`DocumentIntelligenceClient.begin_analyze_document` starts the long-running analysis. The layout model (`prebuilt-layout`) extracts tables, selection marks and section structure and emits Markdown when `output_content_format` is `markdown` (enum `DocumentContentFormat.MARKDOWN`, shown as `ContentFormat.MARKDOWN` in older samples; REST: `outputContentFormat=markdown`); the Markdown is returned in `result.content`. `prebuilt-read` returns text without table or section structure, the general document model `prebuilt-document` is deprecated in favor of layout with `keyValuePairs`, and `prebuilt-documentSearch` is a Content Understanding analyzer, not a Document Intelligence model. `features` and `output` request add-ons and extra outputs (PDF, figures), not the content format.",
+      "ref": {"title": "What is the Document Intelligence layout model?", "url": "https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/prebuilt/layout"},
+      "tags": ["document-intelligence", "python-sdk", "layout", "markdown"]
+    },
+    {
+      "id": "d5-15",
+      "objective": "5.1",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You are extending a RAG solution that uses Azure AI Search. New content consists of recorded customer calls (.mp3) and product training videos (.mp4) that are stored in Blob Storage. The index must contain searchable transcripts, a summary of each call, and a description of each segment of every video. You want to write as little custom processing logic as possible. What should you do?",
+      "options": [
+        "Add an Azure Content Understanding skill to the blob indexer skillset and let the indexer process the audio and video files",
+        "Call the `prebuilt-audioSearch` and `prebuilt-videoSearch` analyzers, then embed and index the returned Markdown",
+        "Set `imageAction` to `generateNormalizedImages` on the blob indexer and add an OCR skill to the skillset",
+        "Call the Document Intelligence `prebuilt-read` model, and then embed and push the returned text to the index"
+      ],
+      "answer": [1],
+      "explanation": "Content Understanding's RAG analyzers cover every modality: `prebuilt-audioSearch` returns a transcript and a conversation summary, and `prebuilt-videoSearch` returns transcripts plus a description of each automatically detected segment, all as Markdown that you can chunk, embed and index. The Azure Content Understanding skill in Azure AI Search uses document analyzers only (PDF, Office, image, HTML and text formats). OCR and Document Intelligence Read extract text from images and documents, not speech.",
+      "ref": {"title": "Prebuilt analyzers in Azure Content Understanding in Foundry Tools", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/prebuilt-analyzers"},
+      "tags": ["content-understanding", "audio", "video", "rag-ingestion"]
+    },
+    {
+      "id": "d5-16",
+      "objective": "5.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You are building an Azure AI Search skillset for PDF manuals whose tables often continue across several pages. Each table must be extracted as a single Markdown table, chunks must be able to span page boundaries, and the location of text and images must be captured as metadata. You want one built-in skill to perform both content extraction and chunking. Which skill should you use?",
+      "options": [
+        "Azure Content Understanding skill",
+        "Document Layout skill with `outputFormat` set to `markdown`",
+        "Document Extraction skill",
+        "Text Split skill"
+      ],
+      "answer": [0],
+      "explanation": "The Azure Content Understanding skill extracts Markdown and chunks it in one step, and compared with the Document Layout skill it recognizes cross-page tables, produces Markdown tables and supports chunks that span pages. The Document Layout skill doesn't recognize cross-page tables or produce chunks that span pages, the Document Extraction skill returns raw text and images without chunking, and the Text Split skill only chunks text that another skill extracted. The skill was preview from November 2025 and GA in April 2026; semantic chunking and built-in figure descriptions were added after the exam outline (preview June 2026, GA in REST `2026-10-01`).",
+      "ref": {"title": "Azure Content Understanding skill", "url": "https://learn.microsoft.com/en-us/azure/search/cognitive-search-skill-content-understanding"},
+      "tags": ["azure-ai-search", "skillset", "content-understanding-skill", "chunking"]
+    },
+    {
+      "id": "d5-17",
+      "objective": "5.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A RAG app sends the following request to an Azure AI Search index that holds two million chunks. Answers are often grounded on weak passages even though better chunks exist in the index. You need to improve the quality of the five passages that the query returns without changing the index. What should you change?",
+      "code": "{\n  \"search\": \"warranty terms for refurbished devices\",\n  \"vectorQueries\": [\n    { \"kind\": \"text\", \"text\": \"warranty terms for refurbished devices\",\n      \"fields\": \"chunk_vector\", \"k\": 5 }\n  ],\n  \"queryType\": \"semantic\",\n  \"semanticConfiguration\": \"chunk-semantic\",\n  \"top\": 5\n}",
+      "options": [
+        "Set `k` to 50 and keep `top` at 5",
+        "Set `top` to 50 and keep `k` at 5",
+        "Add `exhaustive: true` to the vector query",
+        "Add `vectorFilterMode: postFilter` to the request"
+      ],
+      "answer": [0],
+      "explanation": "The semantic ranker reranks up to 50 results of the RRF-merged set, and the guidance is to set `k` to 50 whenever semantic ranking is combined with vector queries so the ranker isn't deprived of candidates; `top` then trims the response to five. Raising `top` only returns more rows without giving the vector query more candidates. `exhaustive` forces a full scan of all the vectors but still hands the ranker only five vector candidates, and `vectorFilterMode` matters only when a filter is present. This behavior is unchanged since the exam outline; Learn now titles these pages Foundry IQ (Azure AI Search) after the November 2026 rename.",
+      "ref": {"title": "Create a hybrid query", "url": "https://learn.microsoft.com/en-us/azure/search/hybrid-search-how-to-query"},
+      "tags": ["azure-ai-search", "hybrid-search", "semantic-ranker", "rrf"]
+    },
+    {
+      "id": "d5-18",
+      "objective": "5.1",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "The `chunk_vector` field of an Azure AI Search index has a vectorizer assigned through its vector profile. You need to run a hybrid query that lets the search service vectorize the user's question and that applies semantic ranking. Complete the Python code.",
+      "code": "from azure.search.documents import SearchClient\nfrom azure.search.documents.models import VectorizableTextQuery, VectorizedQuery\n\nvector_query = [[1]](\n    text=question, k_nearest_neighbors=50, fields=\"chunk_vector\"\n)\nresults = search_client.search(\n    search_text=question,\n    vector_queries=[vector_query],\n    query_type=\"[[2]]\",\n    [[3]]=\"chunk-semantic\",\n    select=[\"title\", \"chunk\"],\n    top=5,\n)",
+      "blanks": [
+        {"options": ["VectorizedQuery", "VectorizableTextQuery", "VectorQuery", "RawVectorQuery"], "answer": 1},
+        {"options": ["full", "hybrid", "semantic", "simple"], "answer": 2},
+        {"options": ["semantic_query", "scoring_profile", "semantic_configuration", "semantic_configuration_name"], "answer": 3}
+      ],
+      "explanation": "`VectorizableTextQuery` sends text that the index's vectorizer converts to an embedding at query time (REST `kind` set to `text`), whereas `VectorizedQuery` requires a precomputed `vector`. A hybrid query is simply `search_text` plus `vector_queries` - there is no `hybrid` query type - and the result sets are fused with RRF. Semantic ranking is requested with `query_type` set to `semantic` together with `semantic_configuration_name`.",
+      "ref": {"title": "Create a vector query", "url": "https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-query"},
+      "tags": ["azure-ai-search", "python-sdk", "hybrid-search", "semantic-ranker"]
+    },
+    {
+      "id": "d5-19",
+      "objective": "5.1",
+      "type": "yesno",
+      "difficulty": 1,
+      "hot": true,
+      "stem": "You send a single request to Azure AI Search that contains a `search` string, one vector query, `queryType` set to `semantic`, a `semanticConfiguration`, `captions` and `answers` set to `extractive`, and `top` set to 10. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "The keyword results and the vector results are merged into one ranking by using Reciprocal Rank Fusion before semantic ranking runs.", "answer": true},
+        {"text": "The semantic ranker rescores every document that matches the query.", "answer": false},
+        {"text": "The returned captions and answers are written by a generative model and can contain text that isn't in the index.", "answer": false}
+      ],
+      "explanation": "In a hybrid query the text and vector queries run in parallel and RRF (each list contributes `1/(rank + k)`) fuses them into `@search.score`. The semantic ranker then rescores only the top 50 fused results and reports `@search.rerankerScore` (0 to 4). Captions and answers are extracted verbatim from your indexed content by machine reading comprehension models; no generative model composes new text.",
+      "ref": {"title": "Relevance scoring in hybrid search using Reciprocal Rank Fusion (RRF)", "url": "https://learn.microsoft.com/en-us/azure/search/hybrid-search-ranking"},
+      "tags": ["azure-ai-search", "rrf", "semantic-ranker", "hybrid-search"]
+    },
+    {
+      "id": "d5-20",
+      "objective": "5.1",
+      "type": "yesno",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "An Azure AI Search index stores, for each chunk, the object IDs of the Microsoft Entra groups that are allowed to read it in a field named `group_ids` of type `Collection(Edm.String)`. Your API resolves the caller's groups and adds the following filter to every query: `group_ids/any(g:search.in(g, 'id1, id2'))`. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "The `group_ids` field must have the `filterable` attribute set to `true`.", "answer": true},
+        {"text": "Setting `retrievable` to `false` on `group_ids` is sufficient to prevent users from finding documents that they aren't allowed to read.", "answer": false},
+        {"text": "Azure AI Search validates the caller's group membership against Microsoft Entra ID when it evaluates this filter.", "answer": false}
+      ],
+      "explanation": "The security-filter pattern is ordinary OData filtering: the field must be `filterable`, and `search.in` is used because it stays fast for long lists of IDs. The service performs no authentication or authorization with those IDs - they are just strings - so the app must authenticate the user, resolve trusted group IDs and apply the filter to every query. `retrievable: false` only keeps the IDs out of results. This filter pattern is the same in the exam era and today; service-enforced permissions use native ACL or RBAC-scope permission filters with the `x-ms-query-source-authorization` header (preview in April 2026, GA in REST `2026-10-01`).",
+      "ref": {"title": "Security filters for trimming results", "url": "https://learn.microsoft.com/en-us/azure/search/search-security-trimming-for-azure-search"},
+      "tags": ["azure-ai-search", "security-trimming", "filters"]
+    },
+    {
+      "id": "d5-21",
+      "objective": "5.1",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "An indexer ingests files from Azure Data Lake Storage Gen2 together with their ACLs into an index that has permission filters enabled (fields annotated as `userIds` and `groupIds`). A web API queries the index by using its managed identity, which has the Search Index Data Reader role. Each query must return only the documents that the signed-in user is allowed to access, and the API must not build identity filter expressions itself. What should the API do?",
+      "options": [
+        "Add a `filter` that uses `search.in` with the object IDs of the user's groups",
+        "Send the user's access token in the `Authorization` header instead of the managed identity token",
+        "Assign the Search Index Data Reader role to each user on the search service",
+        "Send the user's access token in the `x-ms-query-source-authorization` header"
+      ],
+      "answer": [3],
+      "explanation": "With native permission filtering, `Authorization` carries the caller's token for Search RBAC (here the API's managed identity), while `x-ms-query-source-authorization` carries the delegated user's token that the service evaluates against the indexed ACL metadata. A `search.in` filter is the app-managed pattern that the requirement rules out. Search RBAC roles control access to the index as a whole, not to individual documents. Native permission filtering was a preview feature in April 2026 (introduced May 2025) and is GA in REST `2026-10-01`; the header is the same in both.",
+      "ref": {"title": "Document-level access control", "url": "https://learn.microsoft.com/en-us/azure/search/search-document-level-access-overview"},
+      "tags": ["azure-ai-search", "document-level-access", "acl", "security-trimming"]
+    },
+    {
+      "id": "d5-22",
+      "objective": "5.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "An indexer whose skillset uses the OCR and Entity Recognition skills stops enriching content after 20 documents, and the execution history shows a `Time Out` message. The search service is in West Europe, and your only Foundry resource is in Sweden Central. Company policy forbids storing keys in skillset definitions. You need all documents to be enriched. What should you add to the skillset?",
+      "options": [
+        "A `cognitiveServices` section of type `#Microsoft.Azure.Search.CognitiveServicesByKey` with the key of the Foundry resource",
+        "A `cognitiveServices` section of type `#Microsoft.Azure.Search.AIServicesByKey` with `subdomainUrl`",
+        "A `cognitiveServices` section of type `#Microsoft.Azure.Search.AIServicesByIdentity` with `subdomainUrl`",
+        "A `knowledgeStore` section with the connection string of a storage account"
+      ],
+      "answer": [2],
+      "explanation": "Without an attached Foundry resource, billable built-in skills stop at 20 transactions per indexer per day. `AIServicesByIdentity` attaches the resource through the search service's managed identity (which needs Cognitive Services User on the Foundry resource), so no key is stored and there is no same-region requirement. Both `ByKey` types put a key in the skillset, and `CognitiveServicesByKey` also calls the regional endpoint. A knowledge store is only an output destination for enriched content. Keyless billing became generally available in April 2026 and was a preview feature before that.",
+      "ref": {"title": "Attach a billable resource to a skillset", "url": "https://learn.microsoft.com/en-us/azure/search/cognitive-search-attach-cognitive-services"},
+      "tags": ["azure-ai-search", "skillset", "billing", "managed-identity", "keyless"]
+    },
+    {
+      "id": "d5-23",
+      "objective": "5.1",
+      "type": "multi",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A blob indexer processes PDF files that mix native text with scanned pages. The text on the scanned pages is missing from the index. You need a single searchable field that contains the native text with the recognized text inserted at the position of each image. Which three actions should you perform? Each correct answer presents part of the solution.",
+      "options": [
+        "Set `imageAction` to `generateNormalizedImages` in the indexer configuration",
+        "Set `parsingMode` to `jsonLines` in the indexer configuration",
+        "Add an OCR skill whose `image` input is `/document/normalized_images/*`",
+        "Add a Text Split skill that sets `textSplitMode` to `sentences`",
+        "Add a Text Merge skill that inserts the OCR text at each image's `contentOffset`",
+        "Set `dataToExtract` to `allMetadata` in the indexer configuration"
+      ],
+      "answer": [0, 2, 4],
+      "explanation": "Images are extracted only when the indexer sets `imageAction`, which requires `parsingMode` `default` and `dataToExtract` `contentAndMetadata` - so the `jsonLines` and `allMetadata` options break image extraction. The OCR skill reads `/document/normalized_images/*`, and the Text Merge skill combines `/document/content` with the OCR text by using each image's `contentOffset`. Text Split only chunks text. Add an `outputFieldMappings` entry to send the merged text to the index field.",
+      "ref": {"title": "Extract text and information from images by using AI enrichment", "url": "https://learn.microsoft.com/en-us/azure/search/cognitive-search-concept-image-scenarios"},
+      "tags": ["azure-ai-search", "ocr", "indexer", "skillset"]
+    },
+    {
+      "id": "d5-24",
+      "objective": "5.1",
+      "type": "multi",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "You are implementing an Azure Function that an Azure AI Search skillset calls through a Custom Web API skill (`#Microsoft.Skills.Custom.WebApiSkill`) to redact account numbers. The function returns HTTP 200, but the indexer reports that no enrichments are produced. Which two requirements must the function's response meet? Each correct answer presents part of the solution.",
+      "options": [
+        "It returns a top-level `values` array that contains one record for each `recordId` in the request",
+        "It returns the records in the same order in which they were received",
+        "Each record includes `data`, `errors` and `warnings` properties, where `errors` and `warnings` can be `null`",
+        "It returns the redacted text as `text/plain` with one line per record",
+        "It wraps the enriched records in a top-level `documents` array"
+      ],
+      "answer": [0, 2],
+      "explanation": "The Web API contract is strict: a JSON (`application/json`) response with a top-level `values` array, the same number of records as the request, and for each record the `recordId`, a `data` object whose properties match the skill's `outputs`, plus `errors` and `warnings` (required, but they can be `null`). Records are correlated by `recordId`, so ordering doesn't matter. A success status code with any other content type or shape is treated as invalid and no enrichment is performed.",
+      "ref": {"title": "Custom Web API skill in an enrichment pipeline", "url": "https://learn.microsoft.com/en-us/azure/search/cognitive-search-custom-skill-web-api"},
+      "tags": ["azure-ai-search", "custom-skill", "web-api"]
+    },
+    {
+      "id": "d5-25",
+      "objective": "5.1",
+      "type": "single",
+      "difficulty": 3,
+      "hot": false,
+      "stem": "You are creating a Foundry IQ knowledge base on Azure AI Search for an agent that has its own model and instructions. Users ask multi-part questions, so the knowledge base must use an LLM to break each question into focused subqueries. The knowledge base must return the retrieved grounding content with references rather than a written answer, because the agent composes the final response. Which settings should you use?",
+      "options": [
+        "Retrieval reasoning effort `minimal` and output mode `extractiveData`",
+        "Retrieval reasoning effort `minimal` and output mode `answerSynthesis`",
+        "Retrieval reasoning effort `low` and output mode `answerSynthesis`",
+        "Retrieval reasoning effort `low` and output mode `extractiveData`"
+      ],
+      "answer": [3],
+      "explanation": "Reasoning effort and output mode are independent choices. `low` (or `medium`) runs LLM-based query planning and source selection, whereas `minimal` skips model-based planning and searches all sources with the intents that you supply. `extractiveData` returns grounding content and references for the agent to reason over, while `answerSynthesis` makes the knowledge base's LLM write a natural-language answer with `[ref_id:n]` citations. In April 2026 these settings required the `2025-11-01-preview` API (the GA `2026-04-01` API was extractive only); they are GA in REST `2026-10-01`.",
+      "ref": {"title": "Set the retrieval reasoning effort", "url": "https://learn.microsoft.com/en-us/azure/search/agentic-retrieval-how-to-set-retrieval-reasoning-effort"},
+      "tags": ["azure-ai-search", "agentic-retrieval", "knowledge-base", "foundry-iq"]
+    },
+    {
+      "id": "d5-26",
+      "objective": "5.1",
+      "type": "order",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You have an Azure AI Search service that contains a populated index, and a Microsoft Foundry project. You need a Foundry Agent Service agent to ground its answers through agentic retrieval over the index. Not all of the listed actions are used. Which actions should you perform in sequence?",
+      "items": [
+        "Create a search index knowledge source that wraps the index",
+        "Create a knowledge base that references the knowledge source",
+        "Create a project connection that targets the knowledge base MCP endpoint and authenticates with the project's managed identity",
+        "Create the agent with an MCP tool that uses the project connection and allows only the `knowledge_base_retrieve` tool",
+        "Send the user's question to the agent through the Responses API"
+      ],
+      "distractors": [
+        "Create a vector store and upload the source files for the file search tool",
+        "Add the Azure AI Search tool to the agent with `query_type` set to `vector_semantic_hybrid`"
+      ],
+      "explanation": "Agentic retrieval is exposed through a knowledge base, which references knowledge sources that must already exist. Foundry Agent Service reaches the knowledge base over MCP (the Foundry IQ integration, in preview since November 2025): a project connection targets `{search-endpoint}/knowledgebases/{name}/mcp` with the project's managed identity, which needs Search Index Data Reader on the search service, and the agent's MCP tool is limited to `knowledge_base_retrieve`. In today's SDK these are a `RemoteTool` connection and `MCPTool` with `project_connection_id` and `allowed_tools`. The Azure AI Search tool queries one index directly without query planning, and file search uses its own vector stores.",
+      "ref": {"title": "Connect a Foundry IQ (Azure AI Search) knowledge base to Foundry Agent Service", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/foundry-iq-connect"},
+      "tags": ["agentic-retrieval", "mcp", "foundry-agent-service", "knowledge-base"]
+    }
+  ]
+}

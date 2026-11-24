@@ -1,0 +1,457 @@
+{
+  "part": "d2c",
+  "domain": 2,
+  "cheatsheet": [
+    {
+      "title": "Generation parameters and reasoning-model support",
+      "kind": "table",
+      "columns": ["Parameter", "What it does", "Reasoning models / gotchas"],
+      "rows": [
+        ["`temperature` (0-2, default 1) / `top_p` (default 1)", "Randomness. Low (for example 0.2) = focused and deterministic; higher (0.7+) = more varied. Change one or the other, not both.", "Not supported on o-series and GPT-5 reasoning models. Model router drops them when it selects a reasoning model."],
+        ["`max_output_tokens` (Responses) / `max_completion_tokens` (Chat Completions)", "Upper bound on generated tokens.", "Covers reasoning + visible tokens. `max_tokens` is rejected by reasoning models. Hitting the cap returns `status: incomplete` with `incomplete_details.reason: max_output_tokens`, possibly with no visible text."],
+        ["`reasoning.effort` (Responses) / `reasoning_effort` (Chat Completions)", "How much the model thinks. Exam era (Apr 2026): `none`, `minimal`, `low`, `medium`, `high`, `xhigh` (model-dependent). Docs today add `max` (GPT-5.6 and GPT-6 models, June 2026 onward).", "`minimal` only on the original GPT-5 models; `gpt-5.1` defaults to `none`; `xhigh` on `gpt-5.1-codex-max` and `gpt-5.4` (and later models); `gpt-5-pro` supports only `high`; no parallel tool calls with `minimal`."],
+        ["`text.verbosity` (Responses)", "`low`, `medium`, `high`: how concise the visible answer is.", "Introduced with GPT-5 models; shapes the visible answer, not how much the model reasons."],
+        ["`reasoning.summary` (Responses)", "`auto`, `concise`, `detailed`: returns a summary of the model's reasoning.", "The only supported way to see reasoning; not guaranteed on every request; GPT-5 series doesn't support `concise`."],
+        ["`presence_penalty`, `frequency_penalty`, `logprobs`, `top_logprobs`, `logit_bias`", "Repetition control and token-probability features for non-reasoning models (positive presence penalty pushes toward new topics; range -2.0 to 2.0).", "All unsupported on reasoning models."],
+        ["`stop`", "Up to four sequences; generation ends before the sequence and the text doesn't contain it. Fewer generated tokens also means lower latency.", "Model router drops `stop` when it selects a reasoning model."],
+        ["`seed` (preview)", "Best-effort deterministic sampling; compare `system_fingerprint` to detect backend changes.", "Determinism isn't guaranteed; keep every other parameter identical."],
+        ["`truncation` (Responses)", "`auto` drops items from the middle of the conversation when the context window is exceeded.", "Default is `disabled`: the request fails with a 400 error instead."],
+        ["`text.format` (Responses) / `response_format` (Chat Completions)", "Structured outputs: `type: json_schema` with `strict: true`; every field `required` and `additionalProperties: false`.", "JSON mode (`json_object`) guarantees valid JSON only, not schema adherence, and needs the word JSON in the messages."]
+      ],
+      "note": "Exam era (Apr 2026): the unsupported-parameter list applied to all o-series and GPT-5.x reasoning models. Docs today: the list is worded 'reasoning models other than GPT-6 Astra' (Sept 2026), and GPT-5.6/GPT-6 models (June 2026 onward) restrict function tools combined with reasoning effort on Chat Completions - neither is exam-era. Both eras: for reasoning models a `developer` message is equivalent to a system message - don't send both.",
+      "ref": {"title": "Azure OpenAI reasoning models", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"}
+    },
+    {
+      "title": "Latency and cost levers: need -> use",
+      "kind": "table",
+      "columns": ["Need", "Use", "Watch out"],
+      "rows": [
+        ["Faster first token in a chat UI", "`stream=True`", "Total time (time to last byte) is unchanged; only perceived latency improves."],
+        ["Shorter total response time", "Generate fewer tokens (lower max output tokens, stop sequences, no `n` > 1) or use a smaller, faster model", "TTLT = TTFT + (TBT x tokens generated). Output tokens and the model dominate latency."],
+        ["Reasoning model is slow or expensive", "Lower `reasoning.effort` (`none` or `low` where supported) and size `max_output_tokens`", "Reasoning tokens are billed as output tokens. Docs today (reasoning article rewritten Nov 2026) suggest reserving at least 25,000 tokens while you learn a workload."],
+        ["Same long prefix on every request", "Prompt caching (automatic on supported models)", ">= 1,024 tokens and identical first 1,024 tokens. Static content first, dynamic last. Check `cached_tokens`. In-memory cache clears after 5-10 minutes idle (always within 1 hour). Newer additions in today's docs: `prompt_cache_key`, 24-hour retention, and - for GPT-5.6+ models, June 2026 onward - explicit cache breakpoints with cache-write charges."],
+        ["Regenerate a large text with small edits", "Predicted outputs (preview): `prediction={\"type\": \"content\", \"content\": text}`", "Chat Completions; gpt-4o and gpt-4.1 families. Not with tools, `n` > 1, `logprobs`, penalties > 0, or `max_completion_tokens`. Rejected prediction tokens are billed as output."],
+        ["Streaming without filter buffering", "Asynchronous Filter in the content filter configuration", "Filter signal is delayed (within about 1,000 characters). The app must consume annotations and retract displayed content."],
+        ["Similar prompts repeat across users", "API Management semantic caching: `llm-semantic-cache-lookup` (inbound) + `llm-semantic-cache-store` (outbound)", "Needs an embeddings deployment and Azure Managed Redis with RediSearch. Lower `score-threshold` = stricter similarity."],
+        ["Short calls wait behind long ones", "Separate deployments per workload", "Mixing workloads on one endpoint also lowers the cache hit rate."]
+      ],
+      "note": "Trap: streaming never reduces the time to receive all tokens. Always pair a latency metric with a token-count metric before you call something a regression.",
+      "ref": {"title": "Performance and latency", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/latency"}
+    },
+    {
+      "title": "Prompt engineering vs RAG vs fine-tuning",
+      "kind": "table",
+      "columns": ["Symptom", "Strategy", "Why"],
+      "rows": [
+        ["Wrong tone, format, or scope; need quick iteration", "Prompt engineering (system message, few-shot, parameters) - always first", "No infrastructure or training; cost is per token only."],
+        ["Model lacks private, current, or domain data; invents facts", "RAG (grounding data in the prompt)", "Optimizes context: factual accuracy on dynamic data."],
+        ["Style or format still inconsistent despite detailed prompts; prompts too long", "Fine-tuning", "Optimizes the model: consistent behavior, shorter prompts, distillation to a smaller model, better tool use."],
+        ["You can demonstrate the desired answer", "Supervised fine-tuning (SFT)", "Training signal: prompts + desired responses (JSONL chat format, same system message as at inference)."],
+        ["Quality is a matter of preference (tone, completeness)", "Direct preference optimization (DPO)", "Training signal: a preferred and a rejected response to the same input."],
+        ["Many valid solutions, but you can score them", "Reinforcement fine-tuning (RFT)", "Training signal: prompts + a grader that scores generated responses."]
+      ],
+      "note": "The strategies are complementary: fine-tuning for style, RAG for facts, prompt for per-conversation rules. Evaluate a baseline before you fine-tune. Fine-tuning doesn't replace retrieval for current information.",
+      "ref": {"title": "Compare and combine optimization strategies (Learn module)", "url": "https://learn.microsoft.com/en-us/training/modules/optimize-generative-ai-model-performance/5-compare-combine-strategies"}
+    },
+    {
+      "title": "Prompt techniques Microsoft documents, and traps",
+      "kind": "bullets",
+      "bullets": [
+        "Order matters: state the task first; because of recency bias, repeat key instructions at the end if they're being ignored.",
+        "Few-shot: example user/assistant turns after the system message condition the model for this request only (zero-shot = no examples).",
+        "Clear syntax: separators such as `---`, Markdown or XML tags, uppercase section names; a separator can double as a stop sequence.",
+        "Prime the output with a cue (for example `Key points:` followed by a bullet) to force a format.",
+        "Break the task down. Chain-of-thought prompting ('take a step-by-step approach') is for non-reasoning models only.",
+        "Reduce fabrication: provide grounding context, require citations (inline beats end-of-answer), and give the model an out such as 'respond not found'.",
+        "'Only write true facts' or 'don't fabricate' is not an adequate mitigation by itself. A system message influences the model but doesn't guarantee compliance - layer it with filters and evaluation.",
+        "System message parts: role and task, audience and tone, scope and boundaries, safety guidelines, tools and data, plus explicit fallback behavior when unsure.",
+        "Reasoning models: give the goal, constraints, and output contract instead of step-by-step scripts; prefix `Formatting re-enabled` to the developer message to get Markdown from `o3-mini` or `o1`.",
+        "Never try to extract raw chain of thought from a reasoning model - use `reasoning.summary`; other methods are unsupported and may violate the Acceptable Use Policy."
+      ],
+      "note": "The prompt engineering article states up front that these techniques aren't recommended for reasoning models such as GPT-5 and the o-series.",
+      "ref": {"title": "Prompt engineering techniques", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/prompt-engineering"}
+    },
+    {
+      "title": "Responses API: reasoning controls and token analytics",
+      "kind": "code",
+      "lang": "python",
+      "code": "resp = client.responses.create(\n    model=\"gpt-5-mini\",  # deployment name\n    input=\"Summarize the incident report.\",\n    reasoning={\"effort\": \"low\", \"summary\": \"auto\"},\n    text={\"verbosity\": \"low\"},\n    max_output_tokens=4000,  # reasoning + visible tokens\n)\nif resp.status == \"incomplete\":\n    print(resp.incomplete_details.reason)  # max_output_tokens\nu = resp.usage\nprint(u.input_tokens, u.input_tokens_details.cached_tokens)\nprint(u.output_tokens, u.output_tokens_details.reasoning_tokens)",
+      "note": "Responses names: `reasoning.effort`, `text.verbosity`, `max_output_tokens`, `input_tokens_details`, `output_tokens_details`. Chat Completions names: `reasoning_effort`, `max_completion_tokens`, `prompt_tokens_details`, `completion_tokens_details`. Always check `status` - an incomplete response can contain no visible output but is still billed.",
+      "ref": {"title": "Azure OpenAI reasoning models", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"}
+    },
+    {
+      "title": "Client-side tracing to the project's Application Insights (preview)",
+      "kind": "code",
+      "lang": "python",
+      "code": "import os\nos.environ[\"AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING\"] = \"true\"\nos.environ[\"OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT\"] = \"true\"  # dev only\n\nfrom azure.ai.projects import AIProjectClient\nfrom azure.ai.projects.telemetry import AIProjectInstrumentor\nfrom azure.identity import DefaultAzureCredential\nfrom azure.monitor.opentelemetry import configure_azure_monitor\n\nproject = AIProjectClient(\n    endpoint=os.environ[\"FOUNDRY_PROJECT_ENDPOINT\"],\n    credential=DefaultAzureCredential(),\n)\nconn = project.telemetry.get_application_insights_connection_string()\nconfigure_azure_monitor(connection_string=conn)\nAIProjectInstrumentor().instrument()",
+      "note": "Both eras (azure-ai-projects 2.0.x, March 2026, and today): the opt-in variable must be set before `instrument()` or no spans are produced, and content recording is off by default. Trace context propagation (`AZURE_TRACING_GEN_AI_ENABLE_TRACE_CONTEXT_PROPAGATION`, W3C `traceparent`/`tracestate`): exam era = opt-in; since SDK 2.1.0 (April 20, 2026) = on by default; baggage stays off. Classic Agents SDK tracing docs use `AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED` for content recording, and the classic OpenAI SDK tracing article uses `OpenAIInstrumentor().instrument()` with the same `OTEL_...` variable - both names existed in April 2026.",
+      "ref": {"title": "Add client-side tracing to Foundry agents (preview)", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-client-side"}
+    },
+    {
+      "title": "Observability map: signal -> where to get it",
+      "kind": "table",
+      "columns": ["Signal", "Where", "Detail"],
+      "rows": [
+        ["Agent traces with no code", "Connect Application Insights to the project (today: Build > Agents > Traces > Connect; classic portal: Tracing page)", "Both eras: traces are stored in the connected Application Insights resource; retention and cost follow it. Docs today: server-side tracing is then automatic for prompt agents, hosted agents, and workflows, and the portal shows the last 90 days."],
+        ["Traces from your own code", "OpenTelemetry + `AIProjectInstrumentor` -> `configure_azure_monitor`, console, or any OTLP backend", "`@trace_function` adds spans for custom functions and always records parameters and return values. Traces appear in 2-5 minutes."],
+        ["Latency breakdown per step", "Open a trace and step through its spans", "Spans such as `invoke_agent` and `execute_tool`, plus model-call spans, carry start/end times and attributes (OpenTelemetry GenAI semantic conventions)."],
+        ["Token analytics per call", "`response.usage`", "Responses: `input_tokens_details.cached_tokens`, `output_tokens_details.reasoning_tokens`. Chat Completions: `prompt_tokens_details`, `completion_tokens_details`."],
+        ["Token and latency trends", "Azure Monitor metrics on the Foundry resource", "Processed Prompt Tokens, Generated Completion Tokens, Time to Response (TTFT), Time to Last Byte (TTLT), Time Between Tokens, Tokens per Second, Prompt Token Cache Match Rate, Provisioned-managed Utilization V2, Azure OpenAI Requests (split by `ModelDeploymentName`, `StatusCode`)."],
+        ["Safety signals", "Metrics: Blocked Volume, Harmful Volume Detected, Total Volume Sent For Safety Check. Per call: `prompt_filter_results`, `content_filter_results`", "Filtered prompt -> HTTP 400. Filtered completion -> `finish_reason: content_filter`."],
+        ["Agent health and quality", "Monitor tab of the agent (Agent Monitoring Dashboard in today's docs)", "Token usage, latency, run success rate, evaluation metrics, red teaming results; continuous or scheduled evaluations on production traffic."],
+        ["Per-consumer token usage through a gateway", "API Management `llm-emit-token-metric` -> Application Insights", "Custom dimensions such as API ID, client IP, or user ID."]
+      ],
+      "note": "To view traces you need Log Analytics Reader on the connected Application Insights resource (today's docs add Privileged Monitoring Data Reader for protected tables). The `Latency` metric under Cognitive Services - HTTP Requests is marked 'Do not use for Azure OpenAI service'. Normalized Time to First Byte is only for comparing prompts of different sizes. Today's docs also call content filters guardrails.",
+      "ref": {"title": "Set up tracing in Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-setup"}
+    },
+    {
+      "title": "Orchestrating multiple models and hybrid LLM + rules",
+      "kind": "table",
+      "columns": ["Requirement", "Choose", "Key facts"],
+      "rows": [
+        ["One endpoint that picks a model per prompt", "Model router deployment (`model-router`, version `2025-11-18`)", "Routing modes (announced as routing profiles in Nov 2025): Balanced (default), Quality, Cost. The response `model` field names the model that answered. Automatic failover since March 2026. Exam-era docs show model router with the Chat Completions API; native Responses API support is listed under November 2026."],
+        ["Only approved models, or long prompts, with model router", "Model subset (`properties.routing.models`)", "Failover stays inside the subset - keep at least two models. Effective context window = smallest window in the pool or subset. New models aren't added to a subset automatically."],
+        ["A parameter must be honored, not dropped", "Exam era: a model subset of models that support the parameter (or a direct model deployment). Docs today add a preview (Nov 2026): `routing_config.require_parameters: true` with header `Foundry-Features: ModelRouterControls=V1Preview`", "Both eras: unsupported optional parameters (for example `temperature` on a reasoning model) are ignored and the request continues. Today's preview flag returns HTTP 400 if no model qualifies. Older docs said `reasoning_effort` wasn't supported on model router; today it's passed through when the selected model supports it."],
+        ["Prefer PTU, spill over to pay-as-you-go or another region", "API Management backend pool (round-robin, weighted, priority-based) + backend circuit breaker", "A lower priority group is used only when higher-priority backends' circuit breakers are tripped. For Azure OpenAI backends, trip on 429 and accept `Retry-After`."],
+        ["Per-consumer token budgets", "API Management `llm-token-limit`", "`counter-key`, `tokens-per-minute`, `estimate-prompt-tokens`; can also enforce token quotas per period."],
+        ["Draft -> critique -> revise", "Maker-checker loop (also called evaluator-optimizer, generator-verifier, critic, or reflection loop)", "The checker needs explicit acceptance criteria. Set an iteration cap and a fallback (human escalation, or best result with a quality warning)."],
+        ["A business rule must always hold", "Deterministic routing in code on structured model output", "Agent Framework: `add_edge(a, b, condition=...)`, `add_switch_case_edge_group(src, [Case(...), Default(...)])`. Foundry workflows (preview in the exam era; retiring December 1, 2026 in favor of Agent Framework): if/else, go to, for each, with Power Fx expressions."],
+        ["Cheaper multi-agent runs", "Give each agent a model that matches its task", "Classification, extraction, and formatting agents can use smaller models; monitor token consumption per agent."]
+      ],
+      "note": "Both eras: model router accepts text and image input (the routing decision uses text only) and no audio; the effective context window is limited by the smallest underlying model. Docs today only (November 2026 previews, not exam-era): `model: \"auto\"`, per-request `routing_config`, session affinity, and the Messages API. Agent Framework agent looping (`AgentLoopMiddleware`) is experimental in today's docs and could not be dated - treat it as not exam-era.",
+      "ref": {"title": "How model router works", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-router-how-it-works"}
+    }
+  ],
+  "triggers": [
+    {"when": "Existing Chat Completions code fails after you point it at an o-series or GPT-5 deployment", "pick": "Remove `temperature`, `top_p`, and penalties; use `max_completion_tokens` (Chat Completions) or `max_output_tokens` (Responses)", "why": "Reasoning models reject sampling parameters and `max_tokens`."},
+    {"when": "Empty answer with `status: incomplete` and reason `max_output_tokens`", "pick": "Raise `max_output_tokens` or lower `reasoning.effort`", "why": "The cap includes reasoning tokens, which are billed as output."},
+    {"when": "Cut cost and latency of a long repeated system prompt; `cached_tokens` is 0", "pick": "Put static content first and dynamic content last (>= 1,024 identical prefix tokens)", "why": "Prompt caching is automatic but matches on the prompt prefix."},
+    {"when": "Users must see text appear sooner in a chat UI", "pick": "`stream=True`", "why": "Improves time to first token only; total time is unchanged."},
+    {"when": "Reduce the total time to get the complete response", "pick": "Fewer output tokens (lower cap, stop sequences) or a smaller, faster model", "why": "Generation is token by token; output tokens dominate latency."},
+    {"when": "Rewrite a large document or code file with small edits at low latency", "pick": "Predicted outputs with the `prediction` parameter (preview)", "why": "Known text is supplied as a prediction; not usable with tools or `max_completion_tokens`."},
+    {"when": "Need visibility into how a reasoning model reached its answer", "pick": "`reasoning.summary` in the Responses API", "why": "Raw chain-of-thought extraction is unsupported for reasoning models."},
+    {"when": "Model invents answers when the supplied context doesn't contain them", "pick": "Grounding context + inline citations + an explicit 'not found' out", "why": "These are the documented prompt mitigations; 'don't fabricate' alone is not enough."},
+    {"when": "Consistent brand voice or format and shorter prompts", "pick": "Fine-tuning (SFT; DPO if you have preferred vs rejected pairs)", "why": "Fine-tuning optimizes behavior; RAG optimizes knowledge."},
+    {"when": "Trace Foundry-hosted agents without changing code", "pick": "Connect an Application Insights resource to the project", "why": "Traces are stored in the connected Application Insights resource (today's docs: server-side tracing then starts automatically)."},
+    {"when": "Spans exist but prompts and completions are missing", "pick": "`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` (classic Agents SDK docs: `AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED=true`)", "why": "Content recording is off by default for privacy."},
+    {"when": "First-token latency of streaming requests vs total response time", "pick": "Time to Response vs Time to Last Byte", "why": "The `Latency` metric is marked 'Do not use for Azure OpenAI service'."},
+    {"when": "Lowest cost for mixed-complexity prompts behind one endpoint", "pick": "Model router (Cost mode for high volume, Quality for critical work, model subset for governance)", "why": "Routes each prompt to a suitable model; Balanced is the default."},
+    {"when": "A policy or threshold must be enforced on every request and be auditable", "pick": "Rules in code or conditional workflow edges that act on structured model output", "why": "System messages and fine-tuning don't guarantee compliance."}
+  ],
+  "lookup": [
+    {"topic": "Reasoning model parameters, effort values, unsupported parameters", "search": "Azure OpenAI reasoning models reasoning effort unsupported parameters", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"},
+    {"topic": "Prompt caching rules and usage fields", "search": "prompt caching cached_tokens 1,024 tokens prompt_cache_key", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/prompt-caching"},
+    {"topic": "Latency levers and the latency formula", "search": "Azure OpenAI performance and latency time to last byte streaming", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/latency"},
+    {"topic": "Azure Monitor metric names (tokens, latency, safety)", "search": "Azure OpenAI monitoring data reference metrics", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/monitor-openai-reference"},
+    {"topic": "Tracing setup, roles, server-side vs client-side", "search": "set up tracing in Microsoft Foundry Application Insights", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-setup"},
+    {"topic": "Tracing environment variables and AIProjectInstrumentor", "search": "add client-side tracing to Foundry agents content recording", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-client-side"},
+    {"topic": "Model router modes, subsets, parameter handling, failover", "search": "how model router works routing modes model subset", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-router-how-it-works"},
+    {"topic": "Gateway load balancing, circuit breaker, token and caching policies", "search": "AI gateway in Azure API Management backend load balancer circuit breaker", "url": "https://learn.microsoft.com/en-us/azure/api-management/genai-gateway-capabilities"}
+  ],
+  "flashcards": [
+    {"front": "Output-token cap: Responses API vs Chat Completions?", "back": "`max_output_tokens` (Responses) vs `max_completion_tokens` (Chat Completions). Reasoning models reject `max_tokens`."},
+    {"front": "How are reasoning tokens billed, and where are they reported?", "back": "Billed as output tokens. `output_tokens_details.reasoning_tokens` (Responses) or `completion_tokens_details.reasoning_tokens` (Chat Completions)."},
+    {"front": "Which request parameters do o-series and GPT-5 reasoning models not support?", "back": "`temperature`, `top_p`, `presence_penalty`, `frequency_penalty`, `logprobs`, `top_logprobs`, `logit_bias`, `max_tokens`."},
+    {"front": "Prompt caching eligibility?", "back": "Prompt of at least 1,024 tokens whose first 1,024 tokens are identical. Enabled by default; hits appear as `cached_tokens`."},
+    {"front": "What does `stream=True` improve?", "back": "Time to first response only. The time to receive all tokens stays the same."},
+    {"front": "Environment variable that records prompts and completions in GenAI spans?", "back": "`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` (default false) for azure-ai-projects 2.x and the OpenAI instrumentor. Classic Agents SDK tracing docs: `AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED`. Both existed in April 2026."},
+    {"front": "What must be set before `AIProjectInstrumentor().instrument()`?", "back": "`AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true`; otherwise tracing isn't enabled and a warning is logged."},
+    {"front": "Where does Foundry store traces, and which role lets you view them?", "back": "In the Application Insights resource connected to the project. Log Analytics Reader (today's docs add Privileged Monitoring Data Reader for protected tables)."},
+    {"front": "Azure Monitor metric for first-token latency vs total latency?", "back": "Time to Response (`AzureOpenAITimeToResponse`) vs Time to Last Byte (`AzureOpenAITTLTInMS`)."},
+    {"front": "Metric that counts calls rejected by the content filter?", "back": "Blocked Volume (`RAIRejectedRequests`). Harmful Volume Detected also counts annotate-only detections."},
+    {"front": "Model router routing modes and the default?", "back": "Balanced (default), Quality, Cost. Announced as routing profiles in November 2025."},
+    {"front": "Effective context window of a model router deployment?", "back": "The smallest context window among the models in its pool or model subset."},
+    {"front": "Other names for a maker-checker loop, and its two safeguards?", "back": "Evaluator-optimizer, generator-verifier, critic, or reflection loop. Needs clear acceptance criteria and an iteration cap with fallback behavior."},
+    {"front": "Training signal for SFT vs DPO vs RFT?", "back": "SFT: prompt + desired response. DPO: preferred + rejected response to the same input. RFT: prompt + grader."}
+  ],
+  "questions": [
+    {
+      "id": "d2c-01",
+      "objective": "2.3",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You are tuning a summarization feature that calls a `gpt-5-mini` deployment through the Responses API. The model must spend less time reasoning, must return a reasoning summary when one is available, must produce concise answers, and must not generate more than 2,000 tokens in total. Complete the Python code by selecting the correct option for each placeholder.",
+      "code": "response = client.responses.create(\n    model=\"gpt-5-mini\",\n    input=prompt,\n    reasoning={\"[[1]]\": \"low\", \"summary\": \"auto\"},\n    text={\"[[2]]\": \"low\"},\n    [[3]]=2000,\n)\nprint(response.output_text)",
+      "blanks": [
+        {"options": ["reasoning_effort", "effort", "budget"], "answer": 1},
+        {"options": ["format", "detail", "verbosity"], "answer": 2},
+        {"options": ["max_output_tokens", "max_completion_tokens", "max_tokens"], "answer": 0}
+      ],
+      "explanation": "In the Responses API the reasoning controls are nested: `reasoning={\"effort\": ..., \"summary\": ...}`, the conciseness control is `text={\"verbosity\": ...}`, and the cap is `max_output_tokens`, which covers reasoning tokens plus visible output. `reasoning_effort` and `max_completion_tokens` are the Chat Completions spellings, and `max_tokens` isn't supported by reasoning models.",
+      "ref": {"title": "Azure OpenAI reasoning models", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"},
+      "tags": ["responses-api", "reasoning-effort", "verbosity", "max_output_tokens"]
+    },
+    {
+      "id": "d2c-02",
+      "objective": "2.3",
+      "type": "single",
+      "difficulty": 3,
+      "hot": false,
+      "stem": "An app calls a `gpt-5-mini` deployment through the Responses API with `max_output_tokens=600` to analyze contracts. For long contracts, `response.output_text` is empty. The response shows `status` = `incomplete`, `incomplete_details.reason` = `max_output_tokens`, and `usage.output_tokens_details.reasoning_tokens` = 600. The requests are still billed. You need to receive a complete answer for these contracts. What should you do?",
+      "options": [
+        "Set `truncation` to `auto` so that earlier input items are dropped from the model's context.",
+        "Increase `max_output_tokens` so that it covers reasoning tokens and the visible answer.",
+        "Replace `max_output_tokens` with `max_tokens` so that only visible output is limited.",
+        "Set `temperature` to 0 so that the model returns a shorter, more deterministic answer."
+      ],
+      "answer": [1],
+      "explanation": "`max_output_tokens` caps everything the model generates, including reasoning tokens, so the model used the whole budget on reasoning before it produced visible output - and you still pay for input and reasoning tokens. Raise the cap or lower `reasoning.effort`; today's reasoning article (rewritten November 2026) suggests reserving at least 25,000 tokens while you learn a workload. `truncation` only controls what happens when the input context overflows, and `max_tokens` and `temperature` aren't supported by GPT-5 reasoning models in either era.",
+      "ref": {"title": "Azure OpenAI reasoning models", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"},
+      "tags": ["reasoning-tokens", "max_output_tokens", "incomplete"]
+    },
+    {
+      "id": "d2c-03",
+      "objective": "2.3",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A support assistant calls a `gpt-4.1` deployment through Chat Completions. The system message starts with a line that contains the user's name and the current timestamp, followed by about 3,000 tokens of static policy text. The user's question is sent as the user message. `usage.prompt_tokens_details.cached_tokens` is 0 on every call. You need to reduce input cost and latency without changing the model or the deployment type. What should you do?",
+      "options": [
+        "Enable prompt caching in the deployment settings, and then redeploy the model.",
+        "Shorten the static policy text so that the whole prompt is under 1,024 tokens.",
+        "Move the line with the name and timestamp to the end, after the static policy text.",
+        "Send the same `seed` value on every request so that the service can reuse the whole prompt."
+      ],
+      "answer": [2],
+      "explanation": "Prompt caching is enabled by default on supported models and requires a prompt of at least 1,024 tokens whose first 1,024 tokens are identical across requests; a single differing character in that prefix produces a cache miss (`cached_tokens` = 0). Placing stable content first and dynamic content last makes the prefix cacheable. There's no deployment switch to enable, a prompt under 1,024 tokens isn't eligible at all, and `seed` only influences sampling determinism.",
+      "ref": {"title": "Prompt caching", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/prompt-caching"},
+      "tags": ["prompt-caching", "cached_tokens", "cost"]
+    },
+    {
+      "id": "d2c-04",
+      "objective": "2.3",
+      "type": "multi",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A nightly job calls a `gpt-4.1` Standard deployment to summarize 40,000 support tickets. Nobody reads the output while it is being generated. An evaluation shows that summaries from a smaller model are acceptable. The job must finish sooner, so you need to reduce the time it takes to receive each complete response. Which two actions should you perform? Each correct answer presents part of the solution.",
+      "options": [
+        "Lower the maximum output token limit, and add stop sequences so that fewer tokens are generated.",
+        "Set `stream` to `true` on every request so that tokens are returned as they are generated.",
+        "Set `n` to 3 on every request, and keep the shortest of the three returned choices.",
+        "Add more few-shot examples to the system message so that the model needs less time to respond.",
+        "Send the requests to a smaller, faster model deployment, such as a mini model."
+      ],
+      "answer": [0, 4],
+      "explanation": "Per-call latency is driven mainly by the model and by the number of generated tokens, so generating fewer tokens (lower max tokens, stop sequences) and using a smaller, faster model both shorten the time to the last token. Streaming returns the first tokens sooner but doesn't change the time to get all tokens, so it only helps perceived latency in interactive UIs. `n` > 1 produces several outputs and increases latency, and extra examples only make the prompt larger.",
+      "ref": {"title": "Performance and latency", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/latency"},
+      "tags": ["latency", "streaming", "max-tokens", "model-selection"]
+    },
+    {
+      "id": "d2c-05",
+      "objective": "2.3",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A Python app uses `azure-ai-projects` 2.x to call a Foundry agent. `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING` is set to `true`, the app calls `configure_azure_monitor()` and `AIProjectInstrumentor().instrument()`, and spans appear in the project's traces in the Foundry portal. In the development environment, the built-in spans don't contain the user messages or the model output. You need the message content to be recorded in those spans. What should you do?",
+      "options": [
+        "Set `AZURE_TRACING_GEN_AI_INCLUDE_BINARY_DATA` to `true` before instrumenting.",
+        "Set `AZURE_TRACING_GEN_AI_ENABLE_TRACE_CONTEXT_PROPAGATION` to `true` before instrumenting.",
+        "Set `AZURE_TRACING_GEN_AI_INSTRUMENT_RESPONSES_API` to `true` before instrumenting.",
+        "Set `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` to `true` before instrumenting."
+      ],
+      "answer": [3],
+      "explanation": "Content recording is off by default. Setting `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` to `true` (or passing `enable_content_recording=True` to `instrument()`) adds message contents and tool-call arguments to the built-in spans; use it only where privacy rules allow. The binary-data variable only adds image and file data once content recording is on, trace context propagation only injects W3C trace headers to correlate client and service spans (opt-in in SDK 2.0.x, on by default since 2.1.0 on April 20, 2026), and Responses API auto-instrumentation is already on by default. Era note: this variable was already used by the 2.x SDK in April 2026; the classic Agents SDK tracing docs use `AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED` for the same purpose, so recognize both names.",
+      "ref": {"title": "Add client-side tracing to Foundry agents (preview)", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-client-side"},
+      "tags": ["tracing", "opentelemetry", "content-recording", "application-insights"]
+    },
+    {
+      "id": "d2c-06",
+      "objective": "2.3",
+      "type": "order",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You have a Foundry project that has no monitoring resources connected. A Python console app uses `AIProjectClient` to call an agent in the project. `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING` is already set to `true` in the app's environment. You need the app's spans to appear in the project's traces in the Foundry portal. Not all actions are used. Which actions should you perform in sequence?",
+      "items": [
+        "In the Foundry portal, connect an Application Insights resource to the project.",
+        "In the app, call `project.telemetry.get_application_insights_connection_string()`.",
+        "Pass the returned connection string to `configure_azure_monitor()`.",
+        "Run the code that calls the agent.",
+        "After a few minutes, open the project's traces in the Foundry portal and select the new trace."
+      ],
+      "distractors": [
+        "Set `AZURE_TRACING_GEN_AI_INSTRUMENT_RESPONSES_API` to `false` in the app's environment.",
+        "Create a diagnostic setting on the Foundry resource that sends metrics to a Log Analytics workspace."
+      ],
+      "explanation": "Foundry stores traces in the Application Insights resource connected to the project, so the connection has to exist before `project.telemetry.get_application_insights_connection_string()` can return the value that you pass to `configure_azure_monitor()`. Once the exporter is configured, the agent call emits spans that show up in the portal after a few minutes (typically 2-5 in today's docs). This is the Azure Monitor tracing flow in the SDK README (2.0.0, March 2026) and in today's Learn article. Setting `AZURE_TRACING_GEN_AI_INSTRUMENT_RESPONSES_API` to `false` would turn off automatic instrumentation of Responses calls, and a diagnostic setting routes platform metrics and resource logs rather than the application's OpenTelemetry spans.",
+      "ref": {"title": "Add client-side tracing to Foundry agents (preview)", "url": "https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-client-side"},
+      "tags": ["tracing", "application-insights", "configure_azure_monitor"]
+    },
+    {
+      "id": "d2c-07",
+      "objective": "2.3",
+      "type": "yesno",
+      "difficulty": 1,
+      "hot": true,
+      "stem": "You operate a streaming chat app on a provisioned (PTU) `gpt-4.1` deployment in a Foundry resource. A custom content filter is assigned to the deployment. You are building Azure Monitor charts and alerts from the resource's platform metrics. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "To track how long users wait for the first response chunk, you should chart the Time to Response metric.", "answer": true},
+        {"text": "To alert when the number of calls rejected by the content filter increases, you should use the Blocked Volume metric.", "answer": true},
+        {"text": "To diagnose total response time, you should use the Latency metric in the Cognitive Services - HTTP Requests category.", "answer": false}
+      ],
+      "explanation": "Time to Response (`AzureOpenAITimeToResponse`) is the recommended responsiveness measure for streaming requests, while Time to Last Byte measures the total time. Blocked Volume (`RAIRejectedRequests`) counts calls rejected by the content filter (today's docs also call content filters guardrails); Harmful Volume Detected also includes detections in annotate mode. The `Latency` metric in the Cognitive Services - HTTP Requests category is marked 'Do not use for Azure OpenAI service'.",
+      "ref": {"title": "Azure OpenAI monitoring data reference", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/monitor-openai-reference"},
+      "tags": ["azure-monitor", "latency-metrics", "safety-signals", "content-filter"]
+    },
+    {
+      "id": "d2c-08",
+      "objective": "2.3",
+      "type": "yesno",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You deploy `model-router` with the default settings in a Foundry resource. An app calls the deployment through the Chat Completions API, uses only standard request parameters, and sets `temperature` to 0.2 on every request. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        {"text": "The effective context window of the deployment is the largest context window among the models that it can route to.", "answer": false},
+        {"text": "If model router selects a reasoning model that doesn't support `temperature`, the request fails with an HTTP 400 error.", "answer": false},
+        {"text": "The `model` field in each response names the underlying model that answered the request.", "answer": true}
+      ],
+      "explanation": "The effective context window is limited by the smallest underlying model, so long prompts need a model subset of large-context models. When model router selects a reasoning model, it ignores (drops) unsupported parameters such as `temperature` and the request continues - true in the exam-era docs and today. The response `model` field shows which underlying model answered, and a default deployment uses the Balanced routing mode. Since November 2026 a preview per-request control (`routing_config.require_parameters`) can make such a request fail with HTTP 400 instead, but only if you opt in.",
+      "ref": {"title": "What is model router?", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-router"},
+      "tags": ["model-router", "context-window", "parameters"]
+    },
+    {
+      "id": "d2c-09",
+      "objective": "2.3",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "A legal team sends prompts of very different complexity to one endpoint. Some prompts contain entire case files that exceed the context window of the smaller models in the model router pool. Security has approved three large-context models. Prompts must never be processed by an unapproved model, requests must fail over automatically when a model is temporarily unavailable, and the restriction must apply to every caller without client changes. What should you do?",
+      "options": [
+        "Deploy model router with the full model pool, and set the routing mode to Quality.",
+        "Deploy the three approved models separately, and have each client choose a deployment per request.",
+        "Deploy model router with a model subset that contains only the largest approved model.",
+        "Deploy model router with a model subset that contains the three approved models."
+      ],
+      "answer": [3],
+      "explanation": "A model subset restricts routing to the models you chose and also acts as the fallback set for automatic failover (so keep at least two models), it applies to everyone who calls the deployment, and it removes small-context models so the effective context window is large enough. Quality mode still routes across the full pool, including unapproved models. Separate deployments push model selection and failover into every client. A single-model subset has no other model to fail over to. Era note: a per-request `routing_config.models` control (preview, November 2026) can also narrow routing today, but each caller has to send it.",
+      "ref": {"title": "How model router works", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-router-how-it-works"},
+      "tags": ["model-router", "model-subset", "failover", "governance"]
+    },
+    {
+      "id": "d2c-10",
+      "objective": "2.3",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A RAG app drafts regulatory summaries. Some drafts contain statements that the retrieved passages don't support. You add a reviewer step that scores each draft for groundedness against the retrieved context and returns feedback to the drafting agent, which then revises the draft. You need the loop to produce consistent decisions and to never run indefinitely. What should you configure?",
+      "options": [
+        "Explicit pass/fail acceptance criteria for the reviewer, and an iteration cap with a fallback action.",
+        "A higher `temperature` for the reviewer, and a rule that ends the loop when the reviewer has no more feedback.",
+        "Concurrent execution of the drafting agent and the reviewer, and an aggregator that merges the two outputs.",
+        "Self-assessment by the drafting agent, and a rule that ends the loop when the agent reports high confidence."
+      ],
+      "answer": [0],
+      "explanation": "This is a maker-checker loop (also called an evaluator-optimizer or reflection loop). Microsoft's guidance is to give the checker clear acceptance criteria so that it makes consistent pass/fail decisions, to set an iteration cap that prevents infinite refinement, and to define fallback behavior (human escalation, or the best result with a quality warning) for when the cap is reached. Ending only when the reviewer has no feedback is unbounded, concurrent execution doesn't work because the checker needs the maker's output, and self-reported confidence isn't an independent check against the grounding context.",
+      "ref": {"title": "AI agent orchestration patterns", "url": "https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns"},
+      "tags": ["reflection", "self-critique", "maker-checker", "groundedness"]
+    },
+    {
+      "id": "d2c-11",
+      "objective": "2.3",
+      "type": "single",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "Auditors want a record of how a `gpt-5` deployment arrived at each risk classification. The app uses the Responses API. You need to log a supported representation of the model's reasoning for each request, whenever the model provides one. What should you do?",
+      "options": [
+        "Set `reasoning={\"summary\": \"auto\"}` and log the summary text from the reasoning output items.",
+        "Add a developer message that instructs the model to print its complete chain of thought in each answer.",
+        "Set `logprobs` to `true` and log the token log probabilities returned with the output.",
+        "Read `encrypted_content` from each reasoning output item and log the decoded text."
+      ],
+      "answer": [0],
+      "explanation": "Reasoning summaries (`reasoning.summary` = `auto`, `concise`, or `detailed` in the Responses API) are the supported way to see a reasoning model's thinking, and they aren't guaranteed for every request. Chain-of-thought prompting applies only to non-reasoning models, and trying to extract raw reasoning by other means is unsupported and can violate the Acceptable Use Policy. `logprobs` isn't supported on this reasoning model, and encrypted reasoning items are opaque - they carry reasoning state across turns and aren't meant to be read.",
+      "ref": {"title": "Azure OpenAI reasoning models", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"},
+      "tags": ["reasoning-summary", "chain-of-thought", "responses-api"]
+    },
+    {
+      "id": "d2c-12",
+      "objective": "2.3",
+      "type": "single",
+      "difficulty": 3,
+      "hot": false,
+      "stem": "A refund assistant uses a model to read customer emails. Company policy states that every refund above 500 USD must be approved by a human, and auditors must be able to prove that the rule was applied to every request. In testing, a prompt-only solution with the rule in the system message and `temperature` set to 0 occasionally approves larger refunds automatically. You need to guarantee that the policy is enforced while still using the model to interpret the emails. What should you do?",
+      "options": [
+        "Fine-tune the model on historical refund decisions that comply with the 500 USD approval policy.",
+        "Repeat the 500 USD rule at the end of the system message, and add few-shot examples of escalations.",
+        "Have the model return the amount as structured output, and apply the threshold in workflow code.",
+        "Add a second agent that reviews each decision against the policy in a group chat orchestration."
+      ],
+      "answer": [2],
+      "explanation": "A system message influences the model but doesn't guarantee compliance, even at temperature 0, and fine-tuning or a second LLM reviewer are still probabilistic. A hybrid design keeps the model for language understanding and moves the business rule into deterministic logic: the model emits a schema-constrained amount, and code - for example a conditional or switch-case edge in a Microsoft Agent Framework workflow, or an if/else node in a Foundry workflow (preview in the exam era; Microsoft is retiring Foundry workflows on December 1, 2026 in favor of Agent Framework) - routes amounts above the threshold to human approval. That rule is testable and auditable.",
+      "ref": {"title": "Edges (Microsoft Agent Framework workflows)", "url": "https://learn.microsoft.com/en-us/agent-framework/concepts/workflows/edges"},
+      "tags": ["hybrid-rules", "deterministic-routing", "structured-outputs", "workflow"]
+    },
+    {
+      "id": "d2c-13",
+      "objective": "2.3",
+      "type": "dropdown",
+      "difficulty": 1,
+      "hot": true,
+      "stem": "You are adding token analytics to an app that calls a reasoning model through the Responses API. For each call, you must log the number of input tokens that were served from the prompt cache and the number of tokens that the model spent on reasoning. Complete the Python code by selecting the correct option for each placeholder.",
+      "code": "response = client.responses.create(model=\"gpt-5-mini\", input=prompt)\nusage = response.usage\ncache_hits = usage.[[1]].cached_tokens\nthinking = usage.[[2]].reasoning_tokens\n# Reasoning tokens are billed as [[3]] tokens.",
+      "blanks": [
+        {"options": ["prompt_tokens_details", "input_tokens_details", "cache_tokens_details"], "answer": 1},
+        {"options": ["output_tokens_details", "completion_tokens_details", "reasoning_tokens_details"], "answer": 0},
+        {"options": ["input", "cached", "output"], "answer": 2}
+      ],
+      "explanation": "The Responses API reports usage as `input_tokens` and `output_tokens`, with cache hits in `input_tokens_details.cached_tokens` and reasoning in `output_tokens_details.reasoning_tokens`. `prompt_tokens_details` and `completion_tokens_details` are the Chat Completions names for the same data. Reasoning tokens never appear in the message content, but they occupy context window space and are billed as output tokens.",
+      "ref": {"title": "Azure OpenAI reasoning models", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"},
+      "tags": ["token-analytics", "usage", "cached_tokens", "reasoning_tokens"]
+    },
+    {
+      "id": "d2c-14",
+      "objective": "2.3",
+      "type": "multi",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "An API Management instance fronts two deployments of the same model: a provisioned (PTU) deployment and a Standard pay-as-you-go deployment in another region. Each deployment is registered as a backend. Traffic must go to the PTU deployment first, the pay-as-you-go deployment must be used only while the PTU deployment is throttling with HTTP 429, traffic must return to the PTU deployment as soon as its `Retry-After` period ends, and client apps must not change. Which two actions should you perform? Each correct answer presents part of the solution.",
+      "options": [
+        "Add `llm-semantic-cache-lookup` and `llm-semantic-cache-store` policies to the API.",
+        "Create a load-balanced backend pool that puts the PTU backend in a higher priority group.",
+        "Create a load-balanced backend pool that assigns equal weights to the two backends.",
+        "Configure a circuit breaker rule on the PTU backend that trips on 429 and accepts `Retry-After`.",
+        "Add an `llm-token-limit` policy that sets `tokens-per-minute` for each subscription key."
+      ],
+      "answer": [1, 3],
+      "explanation": "With priority-based load balancing, API Management uses a lower priority group only when all backends in the higher priority group are unavailable because their circuit breaker rules have tripped, so you need both the priority pool and a circuit breaker on the PTU backend. For Azure OpenAI backends, the rule should handle 429 responses and accept the `Retry-After` duration so that the PTU backend is used again as soon as it recovers. Equal weights split traffic instead of preferring PTU, semantic caching reduces calls but doesn't route, and `llm-token-limit` throttles consumers rather than failing over.",
+      "ref": {"title": "Backends in API Management", "url": "https://learn.microsoft.com/en-us/azure/api-management/backends"},
+      "tags": ["api-management", "ai-gateway", "circuit-breaker", "load-balancing", "429"]
+    },
+    {
+      "id": "d2c-15",
+      "objective": "2.3",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A `gpt-4.1` assistant answers HR questions from policy passages that your code retrieves and inserts into the prompt. When the passages don't contain the answer, the model sometimes invents one. The system message already contains the sentence 'Do not fabricate information.' You need to reduce fabricated answers by changing only the prompt. What should you do?",
+      "options": [
+        "Raise `temperature` so that the model considers more candidate answers before it writes a response.",
+        "Tell the model to answer only from the passages, cite them inline, and otherwise say 'not found'.",
+        "Raise `presence_penalty` so that the model avoids repeating text from the retrieved policy passages.",
+        "Move the passages into few-shot examples so that the model treats them as sample answers."
+      ],
+      "answer": [1],
+      "explanation": "Microsoft's prompt guidance says that instructions such as 'don't fabricate information' are often not an adequate mitigation. Restricting answers to the supplied grounding data, requiring citations (inline citations work best), and giving the model an 'out' such as replying 'not found' reduce false answers. A higher temperature makes output more random, a presence penalty pushes the model toward new topics, and few-shot examples condition the response pattern rather than ground this specific answer.",
+      "ref": {"title": "Prompt engineering techniques", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/prompt-engineering"},
+      "tags": ["prompt-engineering", "grounding", "citations", "fabrication"]
+    },
+    {
+      "id": "d2c-16",
+      "objective": "2.3",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A travel company's assistant runs on a base `gpt-4.1-mini` deployment. The model already has the knowledge it needs, but its responses don't reliably follow the brand voice and the required response layout, even with a 2,500-token system message that contains detailed rules and many few-shot examples. Token cost per request is a concern. You have several hundred approved prompt-and-response examples. What should you do?",
+      "options": [
+        "Add a retrieval step that grounds each request in a brand style guide indexed in Azure AI Search.",
+        "Fine-tune the model with supervised fine-tuning on the examples, and shorten the system message.",
+        "Add more few-shot examples to the system message, and lower `top_p` to make the output focused.",
+        "Fine-tune the model with direct preference optimization, using the examples as preferred responses."
+      ],
+      "answer": [1],
+      "explanation": "When a model doesn't reliably keep a style, tone, or format despite detailed prompts, fine-tuning is the documented next step. Supervised fine-tuning learns from prompt-and-desired-response pairs and lets you shorten the prompt, which lowers token cost and latency. RAG addresses missing or changing knowledge rather than behavioral consistency (Azure AI Search appears as 'Foundry IQ (Azure AI Search)' in today's docs), and more few-shot examples add tokens to every request. Direct preference optimization needs a preferred and a rejected response for the same input, which you don't have.",
+      "ref": {"title": "Fine-tune a model for consistent behavior (Learn module)", "url": "https://learn.microsoft.com/en-us/training/modules/optimize-generative-ai-model-performance/4-fine-tune-model"},
+      "tags": ["fine-tuning", "sft", "dpo", "optimization-strategy"]
+    }
+  ]
+}

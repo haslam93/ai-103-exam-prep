@@ -1,0 +1,642 @@
+{
+  "part": "d4",
+  "domain": 4,
+  "cheatsheet": [
+    {
+      "title": "Text analysis: requirement -> what to pick",
+      "kind": "table",
+      "columns": ["Requirement", "Pick", "Why / watch for"],
+      "rows": [
+        ["Entities, topics, summaries or custom fields returned as schema-bound JSON", "Foundry model + structured outputs (`json_schema`, `strict: true`)", "Schema adherence is enforced; JSON mode (`json_object`) only guarantees valid JSON"],
+        ["Detect or redact personal data with fixed categories and confidence scores", "Azure Language PII detection (text, conversation or document)", "Core capability; `recognize_pii_entities` returns `redacted_text`"],
+        ["Identify the language of text", "Azure Language language detection (`detect_language`)", "Exam era: Translator v3 `detect` does this too. Docs today: Translator `2026-06-06` drops Detect and points to this feature"],
+        ["People, places, organizations, dates without training", "Azure Language prebuilt NER (`recognize_entities`)", "Custom NER when you need your own entity categories"],
+        ["Diagnoses, medications and their relations in clinical notes", "Text Analytics for health (`begin_analyze_healthcare_entities`)", "NER + relation extraction + entity linking (UMLS) + assertion detection; optional FHIR output"],
+        ["Sentiment, aspect-level opinions, key phrases or summaries from a prebuilt Foundry Tool", "Azure Language sentiment analysis with opinion mining, key phrase extraction, extractive or abstractive summarization", "Exam era (Apr 2026): regular prebuilt features. Docs today: labelled legacy with a March 31, 2029 retirement date; new projects are pointed to Foundry models"],
+        ["Tone or custom labels, or sentiment + topics + summary in one schema-bound JSON object", "Prompt a Foundry model (instructions + few-shot examples + schema)", "Prebuilt sentiment has no tone label and each Azure Language feature is a separate call; holds in both eras"],
+        ["Harm severity for user or model text, custom banned terms", "Azure AI Content Safety `text:analyze` (guardrails for Foundry deployments)", "Hate, Sexual, SelfHarm, Violence plus blocklists; it does not score sentiment"],
+        ["Agent should call NLP features as tools", "Azure Language MCP server (preview) from the Foundry tool catalog", "Dynamic tool discovery; restrict with `allowed_tools`"],
+        ["High-volume text translation", "Azure Translator NMT (v3 `translate` with `to=`; deployment name `general` in the newer API)", "Billed per source character"],
+        ["Translation with tone, gender or domain adaptation", "LLM-capable Translator API (`2025-10-01-preview` in the exam era, GA as `2026-06-06` since June 2026) with an LLM `deploymentName`, or your own LLM translation flow", "Needs a Microsoft Foundry resource; billed per token; docs today: not available with a private endpoint"],
+        ["Translate whole files and keep layout", "Document translation: synchronous (one file) or asynchronous batch (Blob containers)", "Current document translation APIs use NMT"]
+      ],
+      "note": "Exam framing is LLM-first: use a Foundry model when the output is generative or schema-shaped, and a Foundry Tool when you need a prebuilt, deterministic detector (PII, language, harm severity, NMT).",
+      "ref": { "title": "What is Azure Language in Foundry Tools?", "url": "https://learn.microsoft.com/en-us/azure/ai-services/language-service/overview" }
+    },
+    {
+      "title": "Azure Language in Foundry Tools: status, limits, SDK, MCP",
+      "kind": "bullets",
+      "bullets": [
+        "Exam era (Apr 2026): sentiment analysis + opinion mining, key phrase extraction, summarization, entity linking, CLU and custom text classification were regular Azure Language features next to PII detection, language detection, NER and Text Analytics for health, so any of them can be the expected Foundry Tools answer.",
+        "Docs today: features are split into core (PII detection, language detection, prebuilt and custom NER, Text Analytics for health) and legacy (sentiment/opinion mining, summarization, key phrase extraction, entity linking, CLU, custom text classification, orchestration workflow, question answering). The sentiment, summarization, key phrase, CLU and custom text classification pages state retirement on March 31, 2029 and point new projects to Foundry models.",
+        "Prebuilt behaviour in both eras: sentiment returns positive, neutral or negative labels with confidence scores for the document and each sentence; opinion mining (`show_opinion_mining=True`) ties sentiment to aspects; extractive summarization returns ranked source sentences and abstractive summarization generates new text; conversation summarization aspects are `issue`, `resolution`, `recap`, `chapterTitle`, `narrative`.",
+        "Language Studio retires March 20, 2027 (announced February 2026); use the Foundry portal.",
+        "Limits: 5,120 characters per document for synchronous calls; asynchronous calls take up to 125,000 characters across at most 25 documents; request size 1 MB. Documents per request: language detection 1,000; sentiment and key phrases 10; NER, PII and entity linking 5.",
+        "Python package `azure-ai-textanalytics`: `TextAnalyticsClient(endpoint, credential)` with `AzureKeyCredential` or `DefaultAzureCredential`. Methods: `detect_language`, `recognize_entities`, `recognize_pii_entities`, `begin_analyze_healthcare_entities` (long-running), `begin_analyze_actions` (several analyses in one job), plus `analyze_sentiment(show_opinion_mining=True)`, `extract_key_phrases`, `recognize_linked_entities` (the last three are labelled legacy in today's docs).",
+        "Results are per document: check `doc.is_error`. Language detection returns `primary_language.name`, `.iso6391_name` and `.confidence_score`; mixed-language text returns the dominant language with a lower score; unparseable text returns `(unknown)` with score 0.",
+        "Azure Language MCP server (preview since November 2025): remote endpoint `https://{foundry-resource-name}.cognitiveservices.azure.com/language/mcp?api-version=2025-11-15-preview`; a local server also exists. The portal connection takes the Foundry resource name and key (`Ocp-Apim-Subscription-Key`); the first tool call asks for approval.",
+        "In code: `MCPTool(server_label=..., server_url=..., require_approval='always', allowed_tools=[...])`. Tool names shown in the Learn module include `detect_language_from_text` and `extract_named_entities_from_text`."
+      ],
+      "note": "The exam predates the legacy label: expect Azure Language sentiment, key phrase and summarization features as valid answers when a prebuilt Foundry Tool is asked for, and a Foundry model when tone, custom labels or schema-bound output is required. The Foundry resource endpoint is the project endpoint without the `/api/projects/{project}` suffix.",
+      "ref": { "title": "Service limits for Azure Language in Foundry Tools", "url": "https://learn.microsoft.com/en-us/azure/ai-services/language-service/concepts/data-limits" }
+    },
+    {
+      "title": "Structured outputs: where the schema goes",
+      "kind": "code",
+      "lang": "json",
+      "code": "// Responses API: schema under text.format (type, name, schema, strict are siblings)\n\"text\": { \"format\": {\n  \"type\": \"json_schema\", \"name\": \"Facts\", \"strict\": true,\n  \"schema\": {\n    \"type\": \"object\",\n    \"properties\": {\n      \"party\": { \"type\": \"string\" },\n      \"po_number\": { \"type\": [\"string\", \"null\"] }\n    },\n    \"required\": [\"party\", \"po_number\"],\n    \"additionalProperties\": false } } }\n\n// Chat Completions: response_format with a json_schema wrapper\n\"response_format\": { \"type\": \"json_schema\",\n  \"json_schema\": { \"name\": \"Facts\", \"strict\": true, \"schema\": { } } }\n\n// JSON mode: valid JSON only, no schema guarantee\n\"response_format\": { \"type\": \"json_object\" }",
+      "note": "Notice `po_number`: it stays in `required` and becomes optional through the null union. The Responses shape has no `json_schema` wrapper object; Chat Completions does.",
+      "ref": { "title": "Structured outputs", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs" }
+    },
+    {
+      "title": "Strict-mode schema rules and SDK helpers",
+      "kind": "bullets",
+      "bullets": [
+        "Every property must be listed in `required`; model an optional value as a union with null, for example a type of `[string, null]`.",
+        "Set `additionalProperties: false` on every object in the schema.",
+        "Limits: up to 100 object properties in total and up to five levels of nesting; the root object can't be `anyOf`.",
+        "Supported: string, number, boolean, integer, object, array, enum, `anyOf`, `$defs` / `$ref`, recursive schemas. Output keys follow the order of the schema.",
+        "Unsupported keywords: string `minLength`, `maxLength`, `pattern`, `format`; number `minimum`, `maximum`, `multipleOf`; array `minItems`, `maxItems`, `uniqueItems`, `contains`; object `patternProperties`, `minProperties`, `maxProperties`.",
+        "Function calling: add `strict: true` to the function definition. Structured outputs aren't supported with parallel function calls, so set `parallel_tool_calls` to `false`.",
+        "Python helpers with Pydantic models: Chat Completions `client.beta.chat.completions.parse(..., response_format=MyModel)` -> `choices[0].message.parsed`; Responses `client.responses.parse(..., text_format=MyModel)` -> `response.output_parsed`.",
+        "JSON mode needs the word JSON somewhere in the messages (otherwise HTTP 400) and can return partial JSON when `finish_reason` is `length`.",
+        "Structured outputs are not supported with `gpt-audio` and `gpt-audio-mini`, or in bring-your-own-data scenarios."
+      ],
+      "note": "Classic distractor pairs: `text.format` (Responses) versus `response_format` (Chat Completions), and removing a field from `required` versus making it nullable.",
+      "ref": { "title": "Structured outputs - JSON Schema support and limitations", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs" }
+    },
+    {
+      "title": "Sensitive and unsafe content: detector options",
+      "kind": "table",
+      "columns": ["Capability", "Input / mode", "Key settings and facts"],
+      "rows": [
+        ["Text PII (Azure Language)", "Strings; synchronous and stateless", "`piiCategories` to narrow detection; redaction policy `characterMask` (default, optional `redactionCharacter`), `entityMask` (for example [PERSON_1]), `syntheticReplacement` (realistic substitute values), `noMask` (entities only); `confidenceScoreThreshold`; `entitySynonyms`; `valueExclusionPolicy`; language defaults to English. Exam era: these redaction and tuning options were preview API features; GA in API `2026-05-01` (June 2026). `recognize_pii_entities` returning asterisk-masked `redacted_text` applies in both eras"],
+        ["Conversation PII", "Chat or speech-transcript turns; asynchronous job only", "`analyze-conversations` job with task kind `ConversationalPIITask`; `modality` `text` or `transcript`; `redactionSource` `text`, `lexical`, `itn` or `maskedItn`; `includeAudioRedaction: true` returns audio timings; one conversation per request; 1,000 characters per conversation item"],
+        ["Document PII", "Native `.pdf`, `.docx`, `.txt`; asynchronous and storage based", "Returns redacted files that keep document structure plus JSON metadata"],
+        ["Guardrail PII filter (Foundry)", "Model completions", "Modes Annotate, or Annotate and block; can be set per PII category"],
+        ["Content Safety `text:analyze`", "Any text; REST or `ContentSafetyClient.analyze_text(AnalyzeTextOptions(...))`", "`categories` Hate, Sexual, SelfHarm, Violence (all four if omitted); `outputType` `FourSeverityLevels` (default; 0, 2, 4, 6) or `EightSeverityLevels` (0-7); up to 10,000 characters of text per request; response has `categoriesAnalysis` and `blocklistsMatch`"],
+        ["Text blocklists", "Attached per request with `blocklistNames`", "`haltOnBlocklistHit: true` skips harm analysis after a hit; 10,000 terms in total across lists, 128 characters per item, 100 items per add request; edits take effect within about five minutes"],
+        ["Prompt Shields and protected material", "Prompts and documents / model output", "Prompt Shields detects user prompt attacks and indirect (document) attacks; protected material text detection scans AI-generated text for known content and is English only"],
+        ["Tone, intent, policy nuance", "Foundry model prompt", "Prebuilt sentiment returns only positive, neutral and negative labels; ask a model for tone labels through a schema and check quality with evaluations"]
+      ],
+      "note": "Text severity can be returned on the 0-7 scale, but image severity is always 0, 2, 4, 6. In guardrails, blocking level Low is the least restrictive (blocks only high severity) and High blocks low, medium and high.",
+      "ref": { "title": "Harm categories and severity levels", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-safety/concepts/harm-categories" }
+    },
+    {
+      "title": "Azure Translator in Foundry Tools: v3 (exam era) versus the LLM-capable API, endpoints, documents",
+      "kind": "table",
+      "columns": ["Topic", "Facts"],
+      "rows": [
+        ["v3 request (GA; exam-era baseline)", "`POST /translate?api-version=3.0&to=de&to=it`; body is an array of objects with `text`; `from` is optional (autodetect returns `detectedLanguage`); options `textType` plain|html, `profanityAction` NoAction|Marked|Deleted, `profanityMarker` Asterisk|Tag, `category` (Custom Translator category ID), `toScript`, `allowFallback`"],
+        ["LLM-capable request (`2025-10-01-preview` in the exam era; GA as `2026-06-06` in June 2026)", "`POST /translate?api-version=...`; body `inputs[]` with `text`, optional `language` and `textType`, and a required `targets[]` array whose entries carry `language`; the response is `value[]` with `translations[].language` and `.text`. Not backward compatible with v3; per the migration guide, moving from the preview to GA only changes `api-version`"],
+        ["LLM-capable target options", "`deploymentName` (`general` = NMT default, an LLM deployment name, or a custom category ID), `tone` formal|informal|neutral, `gender` female|male|neutral, `adaptiveDatasetId`, `referenceTextPairs` (up to five pairs), `profanityAction`, `script`, `allowFallback`"],
+        ["Operations", "Exam era (v3): languages, translate, transliterate, detect, breaksentence, dictionary lookup and dictionary examples. Docs today (2026-06-06): languages, translate and transliterate only; Detect is replaced by Azure Language detection"],
+        ["LLM translation", "Requires a Microsoft Foundry resource; billed per input and output token (NMT is per source character); limits are 50 array elements and 5,000 characters versus 1,000 and 50,000 for NMT; docs today: not available when the resource uses a private endpoint"],
+        ["Endpoints", "Global `api.cognitive.microsofttranslator.com`; geography endpoints `api-nam`, `api-apc`, `api-eur`; resource-specific `https://NAME.cognitiveservices.azure.com/translator/text/...`, which is mandatory once virtual network or private endpoint access is enabled"],
+        ["Auth headers", "`Ocp-Apim-Subscription-Key`; `Ocp-Apim-Subscription-Region` is required for regional and multi-service resources and optional for a global Translator resource; Microsoft Entra ID on the global endpoint adds `Authorization: Bearer` and `Ocp-Apim-ResourceId`; role Cognitive Services User"],
+        ["Keep or force terms", "`class=notranslate` or `translate=no` attributes work only with `textType=html`; dynamic dictionary markup (`mstrans:dictionary` element with a `translation` attribute) needs an explicit `from` and suits proper nouns"],
+        ["Domain customization", "Custom Translator = trained NMT model (large parallel corpus, typically 10,000+ sentence pairs, retrain to update); adaptive custom translation = dataset of 5-10,000 aligned pairs applied to an LLM at run time, ready in minutes"],
+        ["Document translation, synchronous", "One file per request (10 MB max), one target language, optional glossary, translated file returned in the response, no Blob Storage; PDF is not a supported input format"],
+        ["Document translation, asynchronous batch", "Source and target Blob containers; up to 1,000 files and 250 MB per batch, 40 MB per file, 10 target languages; authorize with SAS tokens or a system-assigned managed identity that has Storage Blob Data Contributor (resource must be in a geographic region, not Global); glossaries in csv, tsv or xlf"],
+        ["Python SDK", "Learn module (exam era), `azure-ai-translation-text` 1.0.x: `TextTranslationClient(credential=AzureKeyCredential(key), region=...)` or with `endpoint=...`; `translate(body=[...], to_language=['fr'], from_language='en')`; `transliterate(body=[...], language='ja', from_script='Jpan', to_script='Latn')`; `get_supported_languages(scope='translation')`. Today's API reference keeps these method names and defaults the client to API `2026-06-06`"]
+      ],
+      "note": "`to` and `from` query parameters are v3, the exam-era GA API; the LLM-capable version moves the source language, target languages and per-target options into the request body. With a virtual network you can't use the global endpoint or token authentication.",
+      "ref": { "title": "Translate (2026-06-06)", "url": "https://learn.microsoft.com/en-us/azure/ai-services/translator/text-translation/2026-06-06/translate-api" }
+    },
+    {
+      "title": "Speech to text and speech translation: which option",
+      "kind": "table",
+      "columns": ["Need", "Use", "Details"],
+      "rows": [
+        ["Live audio, captions, voice agent input", "Real-time transcription (Speech SDK or CLI)", "`recognize_once_async()` handles one utterance (ends on silence or after 15 seconds); continuous mode uses `start_continuous_recognition()` with the `recognizing`, `recognized`, `canceled` and `session_stopped` events"],
+        ["Recorded file, transcript needed now", "Fast transcription API", "Synchronous `POST .../speechtotext/transcriptions:transcribe` with multipart `audio` and `definition`; file up to 5 hours (limit raised in March 2026) and 500 MB; display form only; `locales`, `diarization`, `channels`, `phraseList`, `profanityFilterMode`"],
+        ["Higher quality or translation of a recorded file", "Azure LLM Speech (enhanced mode on the same endpoint; preview in the exam era, GA May 2026)", "`enhancedMode` with `enabled: true` and `task: transcribe`, or `task: translate` plus `targetLanguage`"],
+        ["Large archive in storage, not urgent", "Batch transcription (REST or CLI)", "Asynchronous and best effort (can take up to 30 minutes to start at peak); no phrase lists; a custom model can be used without a hosted endpoint"],
+        ["Domain terms, small list, no training", "Phrase list", "Runtime only: real-time, fast transcription, LLM Speech, Voice Live; `PhraseListGrammar.from_recognizer(...)`; weight 0.0-2.0"],
+        ["Jargon at scale, accents, noisy audio", "Custom speech", "Plain or structured text improves vocabulary; audio + human-labeled transcripts improves acoustics; pronunciation data; evaluate with WER; deploy a custom endpoint and set `speech_config.endpoint_id` (endpoint not needed for batch)"],
+        ["Who spoke when", "Diarization", "Real-time: `ConversationTranscriber` returns `speaker_id` such as Guest-1; fast transcription: `diarization` with `enabled: true` and `maxSpeakers`"],
+        ["Unknown spoken language", "Language identification", "`AutoDetectSourceLanguageConfig(languages=[...])`: up to 4 candidates at-start, up to 10 continuous; continuous mode needs `SpeechServiceConnection_LanguageIdMode` set to `Continuous` and continuous recognition"],
+        ["Speech to translated text", "`SpeechTranslationConfig` + `TranslationRecognizer`", "Set `speech_recognition_language`, call `add_target_language('fr')` per target, read `result.translations[lang]`"],
+        ["Speech to translated speech", "Event-based or manual synthesis", "Event-based: set `voice_name` and handle the `synthesizing` event (one target language only); manual: loop over the translations with a `SpeechSynthesizer`"],
+        ["Interpreter-style speech to speech without setting a source language", "Live Interpreter", "Continuous language identification and low-latency output that keeps the speaker's style; can use personal voice (`voice_name` = `personal-voice`, universal v2 endpoint)"]
+      ],
+      "note": "Phrase lists don't work with batch transcription, and a custom speech model needs a deployed endpoint for everything except batch. The Learn module creates `SpeechConfig(subscription=KEY, endpoint=FOUNDRY_ENDPOINT)`; region-only configuration was required before SDK 1.48.2.",
+      "ref": { "title": "What is speech to text?", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-to-text" }
+    },
+    {
+      "title": "Text to speech and SSML quick reference",
+      "kind": "table",
+      "columns": ["Item", "Syntax / value", "Use"],
+      "rows": [
+        ["Root", "`speak` with `version`, `xmlns` and `xml:lang`", "Required; must contain at least one `voice` element"],
+        ["Voice", "`voice name=en-US-AvaMultilingualNeural`", "Several `voice` elements give a multi-voice dialog"],
+        ["Style and role", "`mstts:express-as` with `style`, `styledegree`, `role`", "Voice-specific styles such as cheerful; `styledegree` 0.01-2 (default 1)"],
+        ["Prosody", "`prosody` with `rate`, `pitch`, `volume`, `contour`, `range`", "Speaking rate, pitch and volume"],
+        ["Pause", "`break time=500ms` or `break strength=medium`", "Strengths: x-weak 250 ms, weak 500, medium 750 (default), strong 1,000, x-strong 1,250; maximum 20,000 ms; `time` overrides `strength`"],
+        ["Sentence-boundary silence", "`mstts:silence type=Sentenceboundary value=200ms`", "Only at the start or end of text or between sentences"],
+        ["Interpretation", "`say-as interpret-as=date format=dmy`", "Also `time` (hms12, hms24), `cardinal`, `ordinal`, `telephone`, `currency`, `characters` / `spell-out`, `address`"],
+        ["Pronunciation", "`phoneme alphabet=ipa ph=...`, `sub alias=...`, `lexicon uri=...`", "Alphabets `ipa`, `sapi`, `ups`, `x-sampa`; a custom lexicon file covers one locale"],
+        ["Language switch", "`lang xml:lang=de-DE`", "Multilingual voices only"],
+        ["HD voices", "`en-US-Ava:DragonHDLatestNeural`", "Real-time synthesis only; subset of SSML; optional `temperature`"],
+        ["Custom voice", "Professional voice fine-tuning or personal voice", "Limited access (apply first); recorded consent statement required; professional voice is deployed to an endpoint; personal voice uses a 5-90 second sample and returns a `speakerProfileId` for `mstts:ttsembedding`"],
+        ["Long audio", "Batch synthesis API", "Asynchronous `PUT texttospeech/batchsyntheses/{id}` with `inputKind` `SSML` or `PlainText`; for output longer than 10 minutes"],
+        ["SDK", "`speak_text_async()`, `speak_ssml_async()`", "`speech_synthesis_voice_name`, `set_speech_synthesis_output_format(...)`; success is `ResultReason.SynthesizingAudioCompleted`"]
+      ],
+      "note": "Escape ampersands and angle brackets in SSML text with XML entities. All markup counts toward billable characters except the `speak` and `voice` tags.",
+      "ref": { "title": "SSML document structure and events", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure" }
+    },
+    {
+      "title": "Voice and audio as an agent modality",
+      "kind": "table",
+      "columns": ["Option", "What it is", "Key facts"],
+      "rows": [
+        ["Voice Live API", "Fully managed speech-to-speech over WebSocket", "Bundles speech to text, the generative model and text to speech with noise suppression, echo cancellation, interruption detection and end-of-turn detection; models are service managed (no deployment); events mostly match the Realtime API (`session.update`, `input_audio_buffer.append`, `response.create`); SDK `azure-ai-voicelive` is async only"],
+        ["Voice Live + Foundry agent", "`connect(endpoint, credential, agent_config=...)` with `agent_name` and `project_name`", "Microsoft Entra ID only (no key authentication in agent mode); instructions live in the agent; Voice Live settings are stored in agent metadata `microsoft.voice-live.configuration` (512-character chunks); in the portal, enable voice mode. Integration was preview in February 2026 and GA with API `2026-04-10` (April 2026); the raw WebSocket API identifies the agent with `agent_id` and `project_id` parameters"],
+        ["Voice Live session settings", "`session.update` event", "`turn_detection.type`: `server_vad` (default), `semantic_vad` (gpt-realtime models only), `azure_semantic_vad`, `azure_semantic_vad_multilingual`; `remove_filler_words`; `input_audio_noise_reduction` type `azure_deep_noise_suppression`; `input_audio_echo_cancellation` type `server_echo_cancellation`"],
+        ["Voice Live customization", "`input_audio_transcription` and `voice`", "`model: azure-speech` with `phrase_list` and `custom_speech` (locale -> custom model ID); voice `type` `azure-standard`, `azure-custom` (with `endpoint_id`) or `azure-personal`; custom models must be in the same Foundry resource"],
+        ["Realtime API", "GPT realtime models that you deploy (`gpt-realtime`, `gpt-realtime-mini`, ...)", "WebRTC for browser and mobile clients (ephemeral token minted by your backend); WebSocket for server to server; SIP for telephony; GA endpoint `/openai/v1` without `api-version`"],
+        ["Audio in chat", "`gpt-audio`, `gpt-audio-mini` on `/chat/completions`", "`modalities=['text', 'audio']`, `audio` with `voice` and `format`, and a content part of type `input_audio` carrying base64 `data` and `format`; 20 MB limit"],
+        ["`/audio` API models", "`client.audio.transcriptions.create(...)` and `client.audio.speech...create(...)`", "Speech to text (25 MB per file): `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `gpt-4o-transcribe-diarize`, `whisper`; text to speech: `gpt-4o-mini-tts` (steer with `instructions`), `tts`, `tts-hd`"],
+        ["Azure Speech MCP Server", "Catalog tool for Foundry agents, file based", "Speech to text from an audio URL and text to speech to a file; needs the resource key plus a container SAS URL in `X-Blob-Container-Url` (read and write); not supported with network-secured Foundry"],
+        ["Content Understanding audio analyzers", "Transcribe, diarize and extract fields", "`prebuilt-callCenter` (summary, sentiment, topics, people) and `prebuilt-audioSearch`; transcript in WebVTT"]
+      ],
+      "note": "Voice Live `azure_semantic_vad` works with every model, whereas plain `semantic_vad` is limited to gpt-realtime models. Exam era: Voice Live attached to a Foundry agent (`agent_config`) is the taught pattern. Docs today also describe Foundry voice agents (`kind: voice`), which postdate the April 2026 outline.",
+      "ref": { "title": "Voice Live API for real-time voice agents", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live" }
+    },
+    {
+      "title": "Speech SDK for Python: keyless recognition and synthesis",
+      "kind": "code",
+      "lang": "python",
+      "code": "import azure.cognitiveservices.speech as speechsdk\nfrom azure.identity import DefaultAzureCredential\n\n# Keyless: resource needs a custom subdomain + Cognitive Services Speech User\ncfg = speechsdk.SpeechConfig(\n    token_credential=DefaultAzureCredential(),\n    endpoint=\"https://YOUR-RESOURCE.cognitiveservices.azure.com/\")\ncfg.speech_recognition_language = \"en-US\"\naudio = speechsdk.audio.AudioConfig(filename=\"call.wav\")\nrec = speechsdk.SpeechRecognizer(speech_config=cfg, audio_config=audio)\nresult = rec.recognize_once_async().get()      # single utterance\nif result.reason == speechsdk.ResultReason.RecognizedSpeech:\n    print(result.text)\n\ncfg.speech_synthesis_voice_name = \"en-US-AvaMultilingualNeural\"\nsynth = speechsdk.SpeechSynthesizer(speech_config=cfg)   # default speaker\nout = synth.speak_ssml_async(ssml).get()       # or speak_text_async(text)\nprint(out.reason == speechsdk.ResultReason.SynthesizingAudioCompleted)",
+      "note": "Key-based form from the Learn module: `SpeechConfig(subscription=KEY, endpoint=FOUNDRY_ENDPOINT)`. For custom speech add `cfg.endpoint_id`. For translation swap in `speechsdk.translation.SpeechTranslationConfig`, `add_target_language()` and `TranslationRecognizer`.",
+      "ref": { "title": "Microsoft Entra authentication with the Speech SDK", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-configure-azure-ad-auth" }
+    }
+  ],
+  "triggers": [
+    { "when": "Model output must always match a fixed JSON schema, including fields that may be empty (Responses API)", "pick": "Structured outputs: `text.format` with `type: json_schema` and `strict: true`; an optional field stays in `required` with a `null` union", "why": "JSON mode only guarantees valid JSON; strict mode needs every property in `required` and `additionalProperties: false`" },
+    { "when": "Aspect-level sentiment or key phrases from a prebuilt Foundry Tool, without prompt engineering", "pick": "Azure Language sentiment analysis with opinion mining (`show_opinion_mining=True`) or key phrase extraction", "why": "Regular prebuilt features in the exam era; today's docs label them legacy (retirement March 31, 2029)" },
+    { "when": "Redact personal data in call transcripts and bleep the matching audio", "pick": "Conversation PII job (`ConversationalPIITask`, `modality: transcript`) with `includeAudioRedaction: true`", "why": "Only the asynchronous conversation API returns audio timings for redaction" },
+    { "when": "One call must return sentiment, tone, topics and a summary as schema-bound JSON", "pick": "Foundry model prompt + structured outputs", "why": "Prebuilt sentiment has no tone label and each Azure Language feature is a separate call" },
+    { "when": "Score user text for harm on a 0-7 scale or match custom banned terms", "pick": "Content Safety `text:analyze` with `outputType: EightSeverityLevels` and `blocklistNames`", "why": "`FourSeverityLevels` returns only 0, 2, 4, 6; blocklists add exact terms" },
+    { "when": "Limit which tools an agent may call on an MCP server", "pick": "`allowed_tools` with a nonempty list, plus `require_approval`", "why": "Omitting it or passing an empty list exposes every tool on the server" },
+    { "when": "Agent should detect language, entities or PII without routing code", "pick": "Azure Language MCP server tool (remote endpoint ending in `/language/mcp`)", "why": "The agent discovers and selects the tools at run time" },
+    { "when": "Translate through the Translator API with a GPT model, a formal tone or gender control", "pick": "LLM-capable API version (`2025-10-01-preview` in the exam era, `2026-06-06` GA today) with `deploymentName`, `tone` or `gender` inside `targets`, on a Foundry resource", "why": "v3 is NMT only; LLM translation requires a Foundry resource" },
+    { "when": "Translator resource is restricted to a virtual network or private endpoint", "pick": "Call the resource-specific custom domain endpoint with the key (and region) headers", "why": "The global endpoint and token authentication can't be used (docs today: LLM translation isn't available either)" },
+    { "when": "HTML content in which brand names must stay untranslated", "pick": "`textType=html` with the `notranslate` class or `translate=no` attribute", "why": "The no-translate markup only works when the text type is HTML" },
+    { "when": "Translate many stored documents, keep layout, no SAS tokens", "pick": "Asynchronous batch document translation + system-assigned managed identity + Storage Blob Data Contributor", "why": "Needs a Translator resource in a geographic region, not Global" },
+    { "when": "Transcript of a recorded file is needed quickly in one synchronous call", "pick": "Fast transcription API (`transcriptions:transcribe`)", "why": "Batch is asynchronous best effort; real-time runs at audio pace" },
+    { "when": "Product names are misrecognized in nightly batch transcription", "pick": "Custom speech model trained with plain text (no hosted endpoint needed for batch)", "why": "Phrase lists aren't available with batch transcription" },
+    { "when": "Real-time voice agent with barge-in, noise suppression and minimal orchestration code", "pick": "Voice Live API (pass `agent_config` to attach a Foundry agent)", "why": "It bundles speech to text, the model, text to speech and conversational enhancements" },
+    { "when": "Browser or mobile client streams audio directly to a realtime model", "pick": "Realtime API over WebRTC with an ephemeral token from your backend", "why": "WebSocket is for server to server and SIP is for telephony" },
+    { "when": "Speech SDK must authenticate without keys and with least privilege", "pick": "Custom subdomain + Cognitive Services Speech User + `SpeechConfig(token_credential=..., endpoint=...)`", "why": "Cognitive Services Contributor has no Speech data-plane access and Cognitive Services User can list keys" }
+  ],
+  "lookup": [
+    { "topic": "Structured outputs and JSON Schema limits", "search": "structured outputs JSON Schema strict text.format response_format", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs" },
+    { "topic": "Azure Language core versus legacy features and feature picker", "search": "What is Azure Language in Foundry Tools core capabilities legacy capabilities", "url": "https://learn.microsoft.com/en-us/azure/ai-services/language-service/overview" },
+    { "topic": "Text PII redaction policies and parameters", "search": "detect and redact PII in text redactionPolicies entityMask syntheticReplacement", "url": "https://learn.microsoft.com/en-us/azure/ai-services/language-service/personally-identifiable-information/how-to/redact-text-pii" },
+    { "topic": "Content Safety text analysis request fields", "search": "quickstart analyze text content outputType haltOnBlocklistHit blocklistNames", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-safety/quickstart-text" },
+    { "topic": "Translator v3 translate parameters (to, from, textType, profanityAction, category); LLM-capable version is the Translate (2026-06-06) page", "search": "Azure Translator 3.0 Translate to from textType profanityAction", "url": "https://learn.microsoft.com/en-us/azure/ai-services/translator/text-translation/reference/v3/translate" },
+    { "topic": "Translator headers, regional resources, Entra ID, virtual network", "search": "Translator authentication and authorization Ocp-Apim-Subscription-Region", "url": "https://learn.microsoft.com/en-us/azure/ai-services/translator/text-translation/reference/authentication" },
+    { "topic": "Speech to text options (real-time, fast, batch, custom speech)", "search": "what is speech to text choose a transcription option", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-to-text" },
+    { "topic": "SSML elements (break, say-as, express-as, prosody)", "search": "SSML document structure and events break mstts:silence", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure" },
+    { "topic": "Voice Live session settings (turn detection, noise, echo, voices)", "search": "how to use the Voice Live API turn_detection azure_semantic_vad", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-how-to" },
+    { "topic": "Speech roles and keyless authentication", "search": "role-based access control for Speech resources Cognitive Services Speech User", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/role-based-access-control" }
+  ],
+  "flashcards": [
+    { "front": "Where does the JSON Schema go for structured outputs in the Responses API versus Chat Completions?", "back": "Responses: `text.format` with sibling properties `type: json_schema`, `name`, `schema`, `strict`. Chat Completions: `response_format` with `type: json_schema` and a nested `json_schema` object holding `name`, `strict`, `schema`." },
+    { "front": "Strict structured outputs: how do you model an optional field?", "back": "Keep it in `required` and declare a union with null, for example a type of `[string, null]`. Every object also needs `additionalProperties: false`." },
+    { "front": "JSON mode versus structured outputs?", "back": "JSON mode (`type: json_object`) guarantees valid JSON only and requires the word JSON in the messages. Structured outputs (`json_schema`, `strict: true`) enforce your schema." },
+    { "front": "Azure Language: exam-era feature set versus today's core and legacy labels?", "back": "Exam era (Apr 2026): sentiment/opinion mining, key phrase extraction, summarization, entity linking, CLU and custom text classification were regular features. Docs today: core = PII detection, language detection, NER (prebuilt and custom), Text Analytics for health; the rest are labelled legacy, and sentiment, summarization, key phrases, CLU and custom text classification show a March 31, 2029 retirement date." },
+    { "front": "Text PII redaction policy kinds?", "back": "`characterMask` (default, optional `redactionCharacter`), `entityMask` (for example [PERSON_1]), `syntheticReplacement` (realistic substitute values), `noMask` (entities returned, no redacted text). Exam era: preview API options; GA in API `2026-05-01` (June 2026)." },
+    { "front": "Conversation PII: how is it called and what is special for transcripts?", "back": "Asynchronous `analyze-conversations` job with task kind `ConversationalPIITask` and `modality: transcript`; `redactionSource` is `text`, `lexical`, `itn` or `maskedItn`; `includeAudioRedaction: true` returns audio timings." },
+    { "front": "Content Safety `outputType` values?", "back": "`FourSeverityLevels` (the default) returns 0, 2, 4, 6. `EightSeverityLevels` returns 0-7 (text). Image analysis only returns 0, 2, 4, 6." },
+    { "front": "What does `haltOnBlocklistHit` do?", "back": "`true`: when a blocklist term matches, no further harm-category analysis is performed. `false`: all analyses run. Blocklists hold up to 10,000 terms in total, 128 characters per item." },
+    { "front": "Translator request shape: v3 versus the LLM-capable version?", "back": "v3 (GA, exam-era baseline): `POST /translate?api-version=3.0&to=fr` with a JSON array of `text` objects; response array with `translations[].to` and `.text`. LLM-capable version (`2025-10-01-preview` in the exam era, `2026-06-06` GA since June 2026): body `inputs[]` with `targets[]` entries (`language`, `deploymentName`, `tone`, `gender`); response `value[]`." },
+    { "front": "What does LLM translation in Azure Translator require?", "back": "A Microsoft Foundry resource and a model deployment named in `targets[].deploymentName`; the NMT deployment name is `general`. Docs today add that it isn't available when the Translator resource uses a private endpoint." },
+    { "front": "Translator operations: v3 versus 2026-06-06?", "back": "Exam era (v3 GA): languages, translate, transliterate, detect, breaksentence, dictionary lookup, dictionary examples. Docs today (2026-06-06, GA June 2026): languages, translate and transliterate only; Detect is replaced by Azure Language language detection." },
+    { "front": "Document translation: synchronous versus asynchronous?", "back": "Synchronous: one file (10 MB max), one target language, file returned in the response, no storage. Asynchronous batch: Blob source and target containers, SAS or system-assigned managed identity with Storage Blob Data Contributor (regional resource), up to 1,000 files and 250 MB per batch." },
+    { "front": "Phrase list versus custom speech?", "back": "Phrase list: runtime hint, no training; works with real-time, fast transcription, LLM Speech and Voice Live; not with batch. Custom speech: trained model (plain text for vocabulary, audio + human-labeled transcripts for acoustics); needs a deployed endpoint except for batch transcription." },
+    { "front": "Roles and setup for keyless Speech SDK access?", "back": "Cognitive Services Speech User (call APIs, view-only on custom projects, can't list keys) or Speech Contributor; the resource needs a custom subdomain; create `SpeechConfig(token_credential=..., endpoint=...)`. Owner, Contributor and Cognitive Services Contributor have no Speech data-plane access." },
+    { "front": "Voice Live turn detection types?", "back": "`server_vad` (default, volume based), `semantic_vad` (gpt-realtime models only), `azure_semantic_vad` and `azure_semantic_vad_multilingual` (all models; support `remove_filler_words` and `interrupt_response`)." },
+    { "front": "How does a Voice Live client attach to a Foundry agent?", "back": "`connect(endpoint, credential, agent_config=...)` with `agent_name` and `project_name` (optional `agent_version`, `conversation_id`). Microsoft Entra ID only; key authentication isn't supported in agent mode, and instructions come from the agent." },
+    { "front": "Realtime API transports and their use?", "back": "WebRTC: browser and mobile clients, with an ephemeral token minted by a backend. WebSocket: server to server. SIP: telephony such as call centers and IVR." },
+    { "front": "Speech-to-speech translation: event-based versus manual synthesis?", "back": "Event-based (`voice_name` plus the `synthesizing` event) works for one target language only. For several targets, iterate `result.translations` and synthesize each with a `SpeechSynthesizer` and a language-specific voice." }
+  ],
+  "questions": [
+    {
+      "id": "d4-01",
+      "objective": "4.1",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A contract-intake service calls a `gpt-4.1` deployment through the Responses API (`POST /openai/v1/responses`). Every response must be a JSON object that adheres to your schema so that a downstream workflow can parse it without extra validation. Complete the request body.",
+      "code": "{\n  \"model\": \"gpt-4.1\",\n  \"input\": \"Extract the parties and the effective date from: ...\",\n  \"[[1]]\": {\n    \"format\": {\n      \"type\": \"[[2]]\",\n      \"name\": \"ContractFacts\",\n      \"strict\": true,\n      \"schema\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"parties\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } },\n          \"effective_date\": { \"type\": \"string\" }\n        },\n        \"required\": [\"parties\", \"effective_date\"],\n        \"additionalProperties\": [[3]]\n      } } }\n}",
+      "blanks": [
+        { "options": ["text", "response_format", "output_format"], "answer": 0 },
+        { "options": ["json_object", "structured_output", "json_schema"], "answer": 2 },
+        { "options": ["true", "false", "null"], "answer": 1 }
+      ],
+      "explanation": "In the Responses API the schema goes under `text.format`, with `type`, `name`, `schema` and `strict` as sibling properties; `response_format` with a nested `json_schema` object is the Chat Completions shape. `json_object` is JSON mode, which guarantees valid JSON but not adherence to a schema. Structured outputs also require `additionalProperties: false` on objects and every property listed in `required`.",
+      "ref": { "title": "Structured outputs", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs" },
+      "tags": ["structured-outputs", "responses-api", "json-schema"]
+    },
+    {
+      "id": "d4-02",
+      "objective": "4.1",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "An extraction agent uses structured outputs with `strict: true`. Some supplier invoices have no purchase-order number, so the `po_number` property must be allowed to carry no value. A developer proposes removing `po_number` from the `required` array. You must keep strict schema adherence. What should you do?",
+      "options": [
+        "Remove `po_number` from `required` and set `additionalProperties` to `true` on the object.",
+        "Keep `po_number` in `required` and declare its type as a union of `string` and `null`.",
+        "Switch the format type to `json_object` and describe the optional field in the system message.",
+        "Remove `po_number` from `required` and add a `minLength` of 0 to its definition."
+      ],
+      "answer": [1],
+      "explanation": "With strict structured outputs every property must appear in `required`; an optional value is emulated with a null union such as a type of `[string, null]`. `additionalProperties` must be `false`, so setting it to `true` breaks strict mode. JSON mode (`json_object`) returns valid JSON without any schema guarantee, and string keywords such as `minLength` are not supported.",
+      "ref": { "title": "Structured outputs - All fields must be required", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs" },
+      "tags": ["structured-outputs", "json-schema", "extraction"]
+    },
+    {
+      "id": "d4-03",
+      "objective": "4.1",
+      "type": "multi",
+      "difficulty": 3,
+      "hot": false,
+      "stem": "A contact center transcribes calls with Azure Speech and stores, for every turn, the display text, the lexical, ITN and masked ITN forms, and word-level audio timings. Before transcripts are passed to a summarization agent, you must redact personal data by using Azure Language in Foundry Tools. You must also obtain the timing information needed to bleep the same segments in the recordings. Which two actions should you perform? Each correct answer presents part of the solution.",
+      "options": [
+        "Run each call as an asynchronous `ConversationalPIITask` job with `modality` set to `transcript`.",
+        "Call `recognize_pii_entities` synchronously for every turn and store `redacted_text` together with the entity offsets.",
+        "Set `includeAudioRedaction` to `true` in the task parameters.",
+        "Set the redaction policy to `syntheticReplacement` for all entity types.",
+        "Upload the transcripts as `.txt` files and run document-based PII detection."
+      ],
+      "answer": [0, 2],
+      "explanation": "Conversation PII is the feature built for turn-based transcripts: it runs as an asynchronous job, accepts the Speech output forms plus `audioTimings`, and returns audio timing for redaction when `includeAudioRedaction` is `true`. Text PII (`recognize_pii_entities`) works on plain strings and returns text offsets only. Synthetic replacement changes how text is masked but gives no audio timing, and document-based PII targets native files such as PDF or DOCX.",
+      "ref": { "title": "Detect and redact Personally Identifiable Information in conversations", "url": "https://learn.microsoft.com/en-us/azure/ai-services/language-service/personally-identifiable-information/how-to/redact-conversation-pii" },
+      "tags": ["pii", "azure-language", "conversation-pii", "sensitive-content"]
+    },
+    {
+      "id": "d4-04",
+      "objective": "4.1",
+      "type": "yesno",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "You use `TextAnalyticsClient.detect_language` from the `azure-ai-textanalytics` package to route incoming support messages by language. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        { "text": "For a message that mixes English and French, the result for that document contains a separate language entry with its own confidence score for each language.", "answer": false },
+        { "text": "If the service can't determine the language of a document, the language name is returned as `(unknown)` with a confidence score of 0.", "answer": true },
+        { "text": "Language detection accepts up to 1,000 documents in one request, whereas named entity recognition and PII detection accept 5.", "answer": true }
+      ],
+      "explanation": "Mixed-language content returns only the language with the largest representation, with a lower confidence score, through `primary_language`. Content that can't be parsed comes back as `(unknown)` with a score of 0. The per-request document limits differ by feature: 1,000 for language detection but 5 for NER and PII (and 5,120 characters per document for synchronous calls).",
+      "ref": { "title": "Detect language (Analyze text with Azure Language in Foundry Tools)", "url": "https://learn.microsoft.com/en-us/training/modules/analyze-text-ai-language/3-detect-language" },
+      "tags": ["azure-language", "language-detection", "limits"]
+    },
+    {
+      "id": "d4-05",
+      "objective": "4.1",
+      "type": "dropdown",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "An app that runs in Azure Container Apps with a managed identity must mask personal data in customer emails by using Azure Language in a Foundry resource. Key-based authentication is disabled on the resource. The code must print each email with the detected personal data masked. Complete the Python code.",
+      "code": "from azure.identity import DefaultAzureCredential\nfrom azure.core.credentials import AzureKeyCredential\nfrom azure.ai.textanalytics import TextAnalyticsClient\n\nclient = TextAnalyticsClient(endpoint=foundry_endpoint,\n                             credential=[[1]])\n\nresponse = client.[[2]](documents=emails, language=\"en\")\nfor doc in response:\n    if not doc.is_error:\n        print(doc.[[3]])",
+      "blanks": [
+        { "options": ["AzureKeyCredential(resource_key)", "DefaultAzureCredential()", "AzureKeyCredential(managed_identity_id)"], "answer": 1 },
+        { "options": ["recognize_pii_entities", "recognize_entities", "extract_key_phrases", "begin_analyze_healthcare_entities"], "answer": 0 },
+        { "options": ["entities", "key_phrases", "redacted_text"], "answer": 2 }
+      ],
+      "explanation": "`TextAnalyticsClient` accepts a Microsoft Entra token credential such as `DefaultAzureCredential`, which picks up the managed identity; `AzureKeyCredential` is key authentication and a client ID is not a key. `recognize_pii_entities` detects personal data, and each result exposes `redacted_text` with the entities masked. `recognize_entities` is general NER and `entities` would list the detections rather than the masked text.",
+      "ref": { "title": "Extract personally identifiable information (PII)", "url": "https://learn.microsoft.com/en-us/training/modules/analyze-text-ai-language/7-extract-personal-information" },
+      "tags": ["azure-language", "pii", "python-sdk", "keyless-auth"]
+    },
+    {
+      "id": "d4-06",
+      "objective": "4.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "You create a Foundry agent in code that uses the remote Azure Language MCP server. `URL` holds the server endpoint and `TOOLS` is the list `['detect_language_from_text', 'extract_named_entities_from_text']`. Compliance requires that the agent can call only those two tools and that every tool call is approved before it runs. Which tool definition should you use?",
+      "options": [
+        "`MCPTool(server_label='lang', server_url=URL, require_approval='never', allowed_tools=TOOLS)`",
+        "`MCPTool(server_label='lang', server_url=URL, require_approval='always', allowed_tools=[])`",
+        "`MCPTool(server_label='lang', server_url=URL, require_approval='always', allowed_tools=TOOLS)`",
+        "`MCPTool(server_label='lang', server_url=URL, require_approval={'never': TOOLS})`"
+      ],
+      "answer": [2],
+      "explanation": "A nonempty `allowed_tools` list restricts the agent to those tools, and `require_approval='always'` makes each call produce an `mcp_approval_request` that must be answered with an `mcp_approval_response`. An empty `allowed_tools` list doesn't limit the agent to the two tools; current docs state that an omitted or empty list allows every tool on the server. The dictionary form with `never` exempts exactly those two tools from approval and leaves all other tools callable.",
+      "ref": { "title": "Connect agents to Model Context Protocol servers", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/model-context-protocol" },
+      "tags": ["mcp", "azure-language", "agents", "tool-approval"]
+    },
+    {
+      "id": "d4-07",
+      "objective": "4.1",
+      "type": "order",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "In the Foundry portal you created an agent named `Text-Analysis-Agent` and connected the Azure Language in Foundry Tools (MCP) tool to it. You now need a Python client that sends a user prompt to the agent and prints the analysis. Not all of the listed actions are required. Which actions should you perform in sequence?",
+      "items": [
+        "Create an `AIProjectClient` with the project endpoint and `DefaultAzureCredential`.",
+        "Call `get_openai_client()` on the project client.",
+        "Call `responses.create()` with the prompt as `input` and an agent reference for `Text-Analysis-Agent` in `extra_body`.",
+        "Print `output_text` from the response."
+      ],
+      "distractors": [
+        "Create a `TextAnalyticsClient` and call `recognize_entities()` on the prompt.",
+        "Call `chat.completions.create()` with the Azure Language MCP endpoint as the base URL."
+      ],
+      "explanation": "The client only talks to the agent: build an `AIProjectClient`, get the OpenAI client from it, call the Responses API with an agent reference (the agent name with type `agent_reference`) in `extra_body`, and read `output_text`. The agent itself discovers and calls the Language MCP tools, so the app doesn't call `TextAnalyticsClient`. The MCP endpoint is a tool server, not a chat completions endpoint.",
+      "ref": { "title": "Connect and use the Language MCP server with an agent", "url": "https://learn.microsoft.com/en-us/training/modules/develop-text-analysis-agent-language-mcp/03-connect-use-language-mcp" },
+      "tags": ["agents", "responses-api", "mcp", "python-sdk"]
+    },
+    {
+      "id": "d4-08",
+      "objective": "4.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "You are designing a feedback-analysis feature. For each product review, a single call must return the overall sentiment, the emotional tone (for example, frustrated or sarcastic), the product aspects that are criticized, and a two-sentence summary, all in one JSON object that matches a fixed schema. No labeled training data is available. What should you use?",
+      "options": [
+        "`analyze_sentiment(show_opinion_mining=True)` plus abstractive summarization in Azure Language, merged in application code",
+        "A custom text classification project in Azure Language for tone, plus key phrase extraction for the aspects",
+        "The Azure AI Content Safety `text:analyze` API with `outputType` set to `EightSeverityLevels`",
+        "A Foundry model deployment prompted for all four outputs, with a strict JSON Schema in structured outputs"
+      ],
+      "answer": [3],
+      "explanation": "Only a prompted model returns all four outputs, including free-form tone labels such as sarcastic, in one call, and structured outputs make the reply adhere to the schema. Azure Language sentiment analysis with opinion mining gives positive, neutral or negative labels and aspect opinions but no tone, and the summary would be a second call whose results you merge yourself. Custom text classification needs labeled training data, and Content Safety scores harm categories rather than sentiment. Docs today also label these Azure Language features legacy (retirement March 31, 2029), but the answer doesn't depend on that.",
+      "ref": { "title": "What are sentiment analysis and opinion mining?", "url": "https://learn.microsoft.com/en-us/azure/ai-services/language-service/sentiment-opinion-mining/overview" },
+      "tags": ["sentiment", "tone", "llm-vs-foundry-tools", "structured-outputs"]
+    },
+    {
+      "id": "d4-09",
+      "objective": "4.1",
+      "type": "single",
+      "difficulty": 2,
+      "hot": true,
+      "stem": "A moderation microservice that runs outside Foundry calls the Azure AI Content Safety `text:analyze` API for user-generated posts. Reviewers need severity on the full 0-7 scale so that they can tune thresholds finely. Posts that contain terms from your `competitor-terms` blocklist must be flagged, and the harm-category analysis must be skipped as soon as a blocklist term is matched. Which request settings should you use?",
+      "options": [
+        "`outputType` = `EightSeverityLevels`, `blocklistNames` = [`competitor-terms`], `haltOnBlocklistHit` = `true`",
+        "`outputType` = `FourSeverityLevels`, `blocklistNames` = [`competitor-terms`], `haltOnBlocklistHit` = `true`",
+        "`outputType` = `EightSeverityLevels`, `blocklistNames` = [`competitor-terms`], `haltOnBlocklistHit` = `false`",
+        "`outputType` = `EightSeverityLevels`, `categories` = [`competitor-terms`], `haltOnBlocklistHit` = `true`"
+      ],
+      "answer": [0],
+      "explanation": "`EightSeverityLevels` returns text severity as 0-7, while `FourSeverityLevels` maps adjacent levels to 0, 2, 4 and 6. Blocklists are attached with `blocklistNames`, and `haltOnBlocklistHit` set to `true` stops further harm analysis once a blocklist is hit; `false` runs all analyses anyway. `categories` only accepts harm categories (Hate, Sexual, SelfHarm, Violence), not blocklist names.",
+      "ref": { "title": "QuickStart: Analyze text content", "url": "https://learn.microsoft.com/en-us/azure/ai-services/content-safety/quickstart-text" },
+      "tags": ["content-safety", "severity", "blocklist", "safety"]
+    },
+    {
+      "id": "d4-10",
+      "objective": "4.1",
+      "type": "multi",
+      "difficulty": 3,
+      "hot": false,
+      "stem": "A marketing app calls Azure Translator text translation v3 through the global endpoint by using a standalone Translator resource. For campaign copy you must now translate with a GPT deployment and request a formal tone, while continuing to call the Translator API instead of writing your own translation prompts. Which two actions should you perform? Each correct answer presents part of the solution.",
+      "options": [
+        "Keep `api-version=3.0` and pass the GPT deployment name in the `category` query parameter of each request.",
+        "Call the LLM-capable Translate API version and set `deploymentName` and `tone` in each `targets` entry.",
+        "Enable a private endpoint on the Translator resource and call its resource-specific custom domain endpoint.",
+        "Use a Microsoft Foundry resource that hosts the GPT model deployment for the Translator calls.",
+        "Add `textType=html` and a `profanityAction` of `Marked` to the existing v3 request."
+      ],
+      "answer": [1, 3],
+      "explanation": "Model choice and tone control are not part of v3; they belong to the LLM-capable Translate API version (`2025-10-01-preview` in the exam era, generally available as `2026-06-06` since June 2026), where each `targets` entry can carry `deploymentName` and `tone` (formal, informal, neutral). LLM-based translation needs a Microsoft Foundry resource to host the model deployment. In v3, `category` selects a Custom Translator NMT model, a private endpoint only changes network access, and `textType` or profanity settings don't change the model or tone.",
+      "ref": { "title": "Translate (2026-06-06)", "url": "https://learn.microsoft.com/en-us/azure/ai-services/translator/text-translation/2026-06-06/translate-api" },
+      "tags": ["translator", "llm-translation", "tone", "foundry-resource"]
+    },
+    {
+      "id": "d4-11",
+      "objective": "4.1",
+      "type": "single",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "You must translate about 200 contracts (scanned PDF and DOCX, 150 MB in total) that are stored in an Azure Blob Storage container into German in a single job. The layout must be preserved, a terminology glossary must be applied, and the results must be written to a second container. Security policy forbids SAS tokens and storage account keys. What should you do?",
+      "options": [
+        "Use synchronous document translation and send each file together with the glossary in the request.",
+        "Use asynchronous batch translation with a Translator resource in the Global region and grant its system-assigned managed identity Storage Blob Data Contributor.",
+        "Use asynchronous batch translation with a Translator resource in West Europe and grant its system-assigned managed identity Storage Blob Data Contributor.",
+        "Use asynchronous batch translation with a Translator resource in West Europe and grant a user-assigned managed identity Storage Blob Data Reader on both containers."
+      ],
+      "answer": [2],
+      "explanation": "Batch document translation reads from and writes to Blob containers and can replace SAS tokens with the Translator resource's system-assigned managed identity, which needs Storage Blob Data Contributor to read, write and delete blobs. Managed identity for document translation requires a resource in a geographic region; a Global resource can only use SAS. Synchronous translation handles one file per request and doesn't accept PDF, and document translation currently supports only system-assigned identities (Reader also couldn't write the output).",
+      "ref": { "title": "Managed identities for Document translation", "url": "https://learn.microsoft.com/en-us/azure/ai-services/translator/document-translation/how-to-guides/create-use-managed-identities" },
+      "tags": ["translator", "document-translation", "managed-identity", "rbac"]
+    },
+    {
+      "id": "d4-12",
+      "objective": "4.1",
+      "type": "single",
+      "difficulty": 3,
+      "hot": false,
+      "stem": "A compliance team uses a `gpt-4.1-mini` deployment to summarize incident reports into a fixed five-section format. To get consistent structure and regulator-approved wording, the prompt now carries 40 few-shot examples, which makes each call slow and expensive. The format is stable, retrieval of current policy text already works well, and you have 6,000 reviewed report-and-summary pairs. You need to cut prompt size while keeping the format and tone consistent. What should you do?",
+      "options": [
+        "Run supervised fine-tuning on the report-and-summary pairs and call the fine-tuned deployment with a shorter prompt.",
+        "Run preference fine-tuning (DPO) on the report-and-summary pairs and call the fine-tuned deployment with a shorter prompt.",
+        "Index the 6,000 pairs in Azure AI Search and inject the top 40 matches into each prompt.",
+        "Set `temperature` to 0 and move the 40 examples from the message list into the system message."
+      ],
+      "answer": [0],
+      "explanation": "Supervised fine-tuning trains on prompts with desired responses, which is exactly what the reviewed pairs are, and its documented benefits include reducing prompt overhead and aligning style and structure. DPO needs a preferred and a rejected response for the same input, which you don't have. Retrieving 40 examples or moving them into the system message leaves the prompt just as large.",
+      "ref": { "title": "Training in Microsoft Foundry", "url": "https://learn.microsoft.com/en-us/azure/foundry/fine-tuning/overview" },
+      "tags": ["fine-tuning", "domain-customization", "compliance-summarization", "few-shot"]
+    },
+    {
+      "id": "d4-13",
+      "objective": "4.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A back-office job processes recorded customer voicemails (WAV files under 20 MB). For each file, a single model call must listen to the audio itself, answer the question \"Is the caller upset, and what do they want?\", and return both text and a short spoken reply. The team wants to reuse its existing Chat Completions code and doesn't need a streaming session. Which approach should you use?",
+      "options": [
+        "Deploy `gpt-4o-transcribe` and call `audio.transcriptions.create()` with the question passed in the `prompt` parameter.",
+        "Deploy `gpt-audio` and call `chat.completions.create()` with `modalities` of text and audio and an `input_audio` part.",
+        "Deploy `gpt-realtime` and open a WebSocket session to the `/openai/v1/realtime` endpoint for each voicemail file.",
+        "Deploy `gpt-4o-mini-tts` and call `audio.speech.create()` with the question passed in the `instructions` parameter."
+      ],
+      "answer": [1],
+      "explanation": "The audio-enabled chat models (`gpt-audio`, `gpt-audio-mini`) add the audio modality to `/chat/completions`: base64 audio goes in as an `input_audio` content part and the reply can contain text and audio, with a 20 MB file limit. Transcription models only return a transcript and text-to-speech models only synthesize. The Realtime API is meant for low-latency streaming sessions and wouldn't reuse the Chat Completions code.",
+      "ref": { "title": "Quickstart: Get started with Azure OpenAI audio generation", "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/audio-completions-quickstart" },
+      "tags": ["audio-input", "multimodal", "gpt-audio", "chat-completions"]
+    },
+    {
+      "id": "d4-14",
+      "objective": "4.2",
+      "type": "dropdown",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "You deployed `gpt-4o-mini-tts` in a Foundry resource. A notification service must synthesize a spoken status update in an upbeat tone and stream it to a file. Complete the Python code.",
+      "code": "from openai import AzureOpenAI\n\nclient = AzureOpenAI(azure_endpoint=endpoint, api_key=key,\n                     api_version=\"2025-03-01-preview\")\n\nwith client.audio.[[1]].with_streaming_response.create(\n        model=\"gpt-4o-mini-tts\",\n        [[2]]=\"alloy\",\n        input=\"Your order has shipped!\",\n        [[3]]=\"Speak in an upbeat, excited tone.\",\n) as response:\n    response.stream_to_file(\"update.wav\")",
+      "blanks": [
+        { "options": ["transcriptions", "speech", "translations"], "answer": 1 },
+        { "options": ["voice", "speaker", "style"], "answer": 0 },
+        { "options": ["prompt", "system", "instructions"], "answer": 2 }
+      ],
+      "explanation": "Text to speech with the OpenAI SDK uses `client.audio.speech`, while `audio.transcriptions` is the speech-to-text operation. The request names a `voice` such as `alloy`, passes the text as `input`, and steers delivery with `instructions`, which `gpt-4o-mini-tts` supports for style and tone.",
+      "ref": { "title": "Synthesize speech (Develop a speech-capable generative AI application)", "url": "https://learn.microsoft.com/en-us/training/modules/develop-generative-ai-audio-apps/3b-develop-speech-app" },
+      "tags": ["text-to-speech", "gpt-4o-mini-tts", "python-sdk"]
+    },
+    {
+      "id": "d4-15",
+      "objective": "4.2",
+      "type": "multi",
+      "difficulty": 3,
+      "hot": true,
+      "stem": "A Python worker that runs under a user-assigned managed identity uses the Speech SDK to transcribe audio with an Azure Speech resource. Key-based authentication will be disabled. The identity must be able to call the transcription APIs but must not be able to list keys or change custom speech models. Which two actions should you perform? Each correct answer presents part of the solution.",
+      "options": [
+        "Assign the Cognitive Services Contributor role to the identity on the resource.",
+        "Assign the Cognitive Services Speech User role to the identity on the resource.",
+        "Assign the Cognitive Services User role to the identity on the resource.",
+        "Create the configuration as `SpeechConfig(subscription=identity_client_id, region=resource_region)`.",
+        "Create the configuration as `SpeechConfig(token_credential=credential, endpoint=custom_endpoint)`."
+      ],
+      "answer": [1, 4],
+      "explanation": "Cognitive Services Speech User can call the transcription and synthesis APIs, has view-only access to custom projects, and can't list keys. Cognitive Services User can list keys and edit custom models, and Cognitive Services Contributor has no Speech data-plane access at all. Microsoft Entra authentication needs a custom subdomain and a `SpeechConfig` built from a token credential plus that endpoint; `subscription` and `region` is key authentication.",
+      "ref": { "title": "Role-based access control for Speech resources", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/role-based-access-control" },
+      "tags": ["speech-sdk", "keyless-auth", "rbac", "managed-identity"]
+    },
+    {
+      "id": "d4-16",
+      "objective": "4.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "After each webinar, a 90-minute MP3 recording (about 120 MB) is uploaded. Editors need the complete transcript with speaker labels returned in the same HTTP call, as quickly as possible and with predictable latency, so that they can start editing immediately. Which Azure Speech capability should you use?",
+      "options": [
+        "Batch transcription with the recording referenced by a blob SAS URI",
+        "Real-time transcription with `ConversationTranscriber` reading the file through `AudioConfig`",
+        "Single-shot recognition with `recognize_once_async()` called in a loop over the file",
+        "The fast transcription API with `diarization` enabled in the request `definition`"
+      ],
+      "answer": [3],
+      "explanation": "Fast transcription is the synchronous file API: it returns the transcript faster than real time with predictable latency and supports diarization (the per-file limit has been 5 hours since March 2026). Batch transcription is asynchronous and best effort, and can take up to 30 minutes just to start at peak. The SDK options stream over a session rather than answering one HTTP call, and `recognize_once_async()` handles a single utterance of at most 15 seconds.",
+      "ref": { "title": "What is speech to text?", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-to-text" },
+      "tags": ["speech-to-text", "fast-transcription", "diarization"]
+    },
+    {
+      "id": "d4-17",
+      "objective": "4.2",
+      "type": "yesno",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A logistics company wants better recognition of depot codes and product names in two workloads: a real-time dispatcher assistant built with the Speech SDK, and a nightly batch transcription of recorded calls. For each of the following statements, select Yes if the statement is true. Otherwise, select No.",
+      "statements": [
+        { "text": "A phrase list can be supplied at run time for the real-time assistant without training a model.", "answer": true },
+        { "text": "The nightly batch transcription jobs can use the same phrase list.", "answer": false },
+        { "text": "To use a custom speech model in the batch transcription jobs, you must first deploy the model to a hosted custom endpoint.", "answer": false }
+      ],
+      "explanation": "A phrase list is a runtime recognition feature that needs no training and works with real-time transcription, fast transcription, LLM Speech and Voice Live. It isn't available with batch transcription, where a custom speech model is the way to add vocabulary. A custom model needs a deployed endpoint for every use except batch transcription, which references the model directly.",
+      "ref": { "title": "Improve recognition accuracy with phrase list", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/improve-accuracy-phrase-list" },
+      "tags": ["custom-speech", "phrase-list", "batch-transcription"]
+    },
+    {
+      "id": "d4-18",
+      "objective": "4.2",
+      "type": "single",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "A voice agent reads order updates with a standard Azure neural voice. In the sentence \"Your order arrives on 03/04/2027\", the date must be spoken as 3 April 2027. A 500-millisecond pause must follow the sentence, and the next sentence must use the voice's cheerful speaking style. Which SSML elements should you use?",
+      "options": [
+        "`say-as interpret-as=date format=dmy`, `break time=500ms`, `mstts:express-as style=cheerful`",
+        "`sub alias=dmy`, `mstts:silence type=Leading value=500ms`, `prosody rate=cheerful`",
+        "`say-as interpret-as=date format=mdy`, `break strength=x-strong`, `mstts:express-as style=cheerful`",
+        "`phoneme alphabet=ipa ph=dmy`, `break time=500ms`, `emphasis level=cheerful`"
+      ],
+      "answer": [0],
+      "explanation": "`say-as` with `interpret-as` set to `date` and format `dmy` reads the text as day-month-year, `break` with a `time` of 500 ms inserts an exact pause, and `mstts:express-as` selects a speaking style. Format `mdy` would say March 4, and an `x-strong` break is 1,250 ms. `sub`, `phoneme`, `prosody` and `emphasis` change pronunciation or delivery but don't select a style or interpret a date.",
+      "ref": { "title": "Pronunciation with SSML - say-as element", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-pronunciation" },
+      "tags": ["ssml", "text-to-speech"]
+    },
+    {
+      "id": "d4-19",
+      "objective": "4.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "An agent in Foundry Agent Service uses the Azure Speech MCP Server tool from the tool catalog. Speech-to-text prompts that reference publicly reachable audio URLs succeed. Text-to-speech prompts return an audio link, but the link doesn't work. What should you do?",
+      "options": [
+        "Deploy a `gpt-4o-mini-tts` model to the project and select it as the model that the agent uses for speech.",
+        "Regenerate the container SAS URL with read and write permissions and update the tool connection.",
+        "Assign the Cognitive Services Speech User role to the agent's identity on the Foundry resource.",
+        "Enable voice mode for the agent in the playground and configure a Voice Live standard voice."
+      ],
+      "answer": [1],
+      "explanation": "The Speech MCP server writes synthesized audio to the blob container identified by the SAS URL in `X-Blob-Container-Url`, so a broken audio link points to an invalid, expired or under-permissioned container SAS. Synthesis is done by Azure Speech neural voices, not by a deployed text-to-speech model, and the tool connection authenticates with the resource key rather than a role assignment. Voice mode is the Voice Live integration and is unrelated to this file-based tool.",
+      "ref": { "title": "Connect Azure Speech in Foundry Tools to an agent", "url": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/azure-ai-speech" },
+      "tags": ["speech-mcp", "agents", "troubleshooting", "sas"]
+    },
+    {
+      "id": "d4-20",
+      "objective": "4.2",
+      "type": "order",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "You have a Foundry project with an agent that uses a `gpt-4.1` deployment. You need the agent to transcribe audio files and to generate speech files on request by using the Azure Speech MCP Server. Not all of the listed actions are required. Which actions should you perform in sequence?",
+      "items": [
+        "Create an Azure Storage account and a blob container for the audio files.",
+        "Generate a SAS URL for the container that allows reading and writing.",
+        "Add the Azure Speech MCP Server tool from the catalog, supplying the Foundry resource name, the resource key, and the SAS URL as `X-Blob-Container-Url`.",
+        "Send a speech prompt in the agent playground and approve the tool call."
+      ],
+      "distractors": [
+        "Deploy a `gpt-realtime` model and enable voice mode on the agent.",
+        "Deploy a custom speech endpoint and add its endpoint ID to the agent instructions."
+      ],
+      "explanation": "Unlike text-only MCP tools, the Speech MCP server needs storage: create the container first, then issue a container SAS URL, then connect the catalog tool with the resource name, key and `X-Blob-Container-Url`, and finally prompt the agent and approve the first tool call. A realtime model with voice mode is the Voice Live path for live conversations, and custom speech endpoints aren't part of this tool's setup.",
+      "ref": { "title": "Connect and use the Speech MCP server with an agent", "url": "https://learn.microsoft.com/en-us/training/modules/develop-speech-agent-speech-mcp/03-connect-use-speech-mcp" },
+      "tags": ["speech-mcp", "agents", "storage"]
+    },
+    {
+      "id": "d4-21",
+      "objective": "4.2",
+      "type": "single",
+      "difficulty": 3,
+      "hot": false,
+      "stem": "A kiosk voice agent uses the Voice Live API with a `gpt-4.1` model. The kiosk plays responses through a loudspeaker next to the microphone. Two problems are reported: the agent sometimes reacts to its own voice, and it stops talking whenever a customer says a filler such as \"umm\" or \"uh\". You need to fix both problems in the `session.update` event without adding client-side audio processing. Which settings should you use?",
+      "options": [
+        "`input_audio_noise_reduction` of type `azure_deep_noise_suppression`, and `turn_detection` of type `server_vad` with a higher `threshold`",
+        "`input_audio_echo_cancellation` of type `server_echo_cancellation`, and `turn_detection` of type `server_vad` with a longer `silence_duration_ms`",
+        "`input_audio_noise_reduction` of type `azure_deep_noise_suppression`, and `turn_detection` of type `azure_semantic_vad` with `remove_filler_words` set to `true`",
+        "`input_audio_echo_cancellation` of type `server_echo_cancellation`, and `turn_detection` of type `azure_semantic_vad` with `remove_filler_words` set to `true`"
+      ],
+      "answer": [3],
+      "explanation": "Server echo cancellation removes the model's own voice from the input, so no client-side echo cancellation is needed, and `azure_semantic_vad` with `remove_filler_words` reduces false barge-in caused by fillers. Noise suppression is a separate setting that doesn't cancel echo, so the combinations that rely on it leave the first problem unsolved. `server_vad` detects speech from audio volume, so a higher threshold or a longer silence duration doesn't make it ignore fillers.",
+      "ref": { "title": "How to use the Voice Live API", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-how-to" },
+      "tags": ["voice-live", "turn-detection", "echo-cancellation"]
+    },
+    {
+      "id": "d4-22",
+      "objective": "4.2",
+      "type": "single",
+      "difficulty": 2,
+      "hot": false,
+      "stem": "A field-service voice agent built on the Voice Live API uses `gpt-4.1` with Azure speech to text for input. It often mis-transcribes part names. You trained a custom speech model for `en-US` in the same Foundry resource. You need the Voice Live session to use that model. What should you configure?",
+      "options": [
+        "In `input_audio_transcription`, set `model` to `gpt-4o-transcribe` and add the part names to `phrase_list`.",
+        "In `voice`, set `type` to `azure-custom` and `endpoint_id` to the custom speech endpoint ID.",
+        "In `input_audio_transcription`, set `model` to `azure-speech` and map `en-US` to the model ID in `custom_speech`.",
+        "On a `SpeechConfig` object, set `endpoint_id` to the custom speech endpoint ID and pass the object to `connect()`."
+      ],
+      "answer": [2],
+      "explanation": "Voice Live takes custom speech models through the `custom_speech` dictionary in `input_audio_transcription`, keyed by locale with the model ID as the value; it works with the `azure-speech` transcription model, and the model must be in the same Foundry resource. Switching to `gpt-4o-transcribe` with a phrase list doesn't use the trained model (current docs also say phrase lists aren't supported with that model). `azure-custom` with `endpoint_id` configures a custom voice for output, and `SpeechConfig.endpoint_id` belongs to the Speech SDK, not to a Voice Live session.",
+      "ref": { "title": "How to customize Voice Live input and output", "url": "https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-how-to-customize" },
+      "tags": ["voice-live", "custom-speech", "agent-modality"]
+    },
+    {
+      "id": "d4-23",
+      "objective": "4.2",
+      "type": "dropdown",
+      "difficulty": 1,
+      "hot": false,
+      "stem": "You are building a kiosk that listens to English speech and shows the translation in French and Japanese by using Azure Speech in a Foundry resource. Complete the Python code.",
+      "code": "import azure.cognitiveservices.speech as speech_sdk\n\ncfg = speech_sdk.translation.[[1]](\n    subscription=foundry_key, endpoint=foundry_endpoint)\ncfg.speech_recognition_language = \"en-US\"\nfor lang in [\"fr\", \"ja\"]:\n    cfg.[[2]](lang)\n\naudio_cfg = speech_sdk.AudioConfig(use_default_microphone=True)\ntranslator = speech_sdk.translation.[[3]](\n    translation_config=cfg, audio_config=audio_cfg)\n\nresult = translator.recognize_once_async().get()\nfor lang in result.translations:\n    print(lang, result.translations[lang])",
+      "blanks": [
+        { "options": ["SpeechConfig", "TranslationConfig", "SpeechTranslationConfig"], "answer": 2 },
+        { "options": ["add_target_language", "set_target_language", "add_translation"], "answer": 0 },
+        { "options": ["SpeechRecognizer", "TranslationRecognizer", "SpeechSynthesizer"], "answer": 1 }
+      ],
+      "explanation": "Speech translation uses `SpeechTranslationConfig` for the connection and languages, one `add_target_language()` call per target, and a `TranslationRecognizer` whose result exposes a `translations` dictionary keyed by language. `SpeechConfig` with `SpeechRecognizer` only transcribes, and `SpeechSynthesizer` is for text to speech.",
+      "ref": { "title": "Translate speech (Translate text and speech with Microsoft Foundry Tools)", "url": "https://learn.microsoft.com/en-us/training/modules/translate-text-speech/4-speech-translation" },
+      "tags": ["speech-translation", "speech-sdk", "python-sdk"]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+name: Report a problem with a question
+description: A wrong answer key, an ambiguous question, an outdated fact or a dead link.
+title: "[question id] "
+labels: ["question-error"]
+body:
+  - type: input
+    id: question
+    attributes:
+      label: Question ID
+      description: Shown in the top-right corner of each question in Practice and in the mock exam review, for example d2a-07.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong?
+      description: Say which answer you think is correct, and why.
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Microsoft Learn page that supports your point
+      placeholder: https://learn.microsoft.com/...

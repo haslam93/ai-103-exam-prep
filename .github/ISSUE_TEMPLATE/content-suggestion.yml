@@ -1,0 +1,30 @@
+name: Suggest a question or topic
+description: Something the exam covers that this app misses, or a question you would like to add.
+title: "[suggestion] "
+labels: ["content"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Skill area
+      options:
+        - Plan and manage an Azure AI solution
+        - Implement generative AI and agentic solutions
+        - Implement computer vision solutions
+        - Implement text analysis solutions
+        - Implement information extraction solutions
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What should be added?
+      description: Describe the topic or draft the question. Please don't post real exam questions; they can't be used here.
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Microsoft Learn page that covers it
+      placeholder: https://learn.microsoft.com/...
